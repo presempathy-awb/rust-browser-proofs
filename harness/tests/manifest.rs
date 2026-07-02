@@ -90,7 +90,10 @@ async fn list_dir_returns_direct_children_only() {
 
     let mut names = m.list_dir("/d").unwrap();
     names.sort();
-    assert_eq!(names, vec!["a".to_string(), "b".to_string(), "sub".to_string()]);
+    assert_eq!(
+        names,
+        vec!["a".to_string(), "b".to_string(), "sub".to_string()]
+    );
 }
 
 #[wasm_bindgen_test]
@@ -159,7 +162,10 @@ async fn orphaned_physical_file_removed_on_load() {
 
     // A physical file never committed to the manifest: an orphan.
     {
-        let f = reg.open(&dir, "00000000deadbeef", true, false).await.unwrap();
+        let f = reg
+            .open(&dir, "00000000deadbeef", true, false)
+            .await
+            .unwrap();
         f.write_at(0, b"orphan").unwrap();
         f.flush().unwrap();
     }
@@ -173,4 +179,99 @@ async fn orphaned_physical_file_removed_on_load() {
         .err()
         .expect("orphan should have been GC'd");
     assert!(matches!(err, pagedb::errors::PagedbError::Io(_)));
+}
+
+#[wasm_bindgen_test]
+async fn both_slots_corrupt_refuses_load_and_preserves_files() {
+    let dir = test_dir("man-both-corrupt").await;
+    let reg = FileRegistry::new();
+
+    let keep_phys;
+    {
+        let m = Manifest::load(&dir, &reg).await.unwrap();
+        let id = m.create_file("/keep.db").unwrap();
+        keep_phys = format!("{id:016x}");
+        m.commit().unwrap();
+        // create_file only allocates the ID - the caller creates the
+        // physical file (as OpfsVfs::open does).
+        let f = reg.open(&dir, &keep_phys, true, false).await.unwrap();
+        f.write_at(0, b"precious").unwrap();
+        f.flush().unwrap();
+    }
+
+    // Corrupt BOTH slots: this is no longer distinguishable-as-fresh.
+    for slot in [Manifest::SLOT_A, Manifest::SLOT_B] {
+        let f = reg.open(&dir, slot, true, false).await.unwrap();
+        f.truncate(0).unwrap();
+        f.write_at(0, b"total-garbage-in-this-slot").unwrap();
+        f.flush().unwrap();
+    }
+
+    // Load must fail typed - NOT come up empty and GC the data files.
+    let err = Manifest::load(&dir, &reg)
+        .await
+        .err()
+        .expect("load must refuse");
+    assert!(matches!(err, pagedb::errors::PagedbError::Io(_)));
+
+    // The data file survived the refused load.
+    let f = reg.open(&dir, &keep_phys, false, false).await.unwrap();
+    let mut buf = [0u8; 8];
+    assert_eq!(f.read_at(0, &mut buf).unwrap(), 8);
+    assert_eq!(&buf, b"precious");
+}
+
+#[wasm_bindgen_test]
+async fn next_id_never_reuses_a_gc_surviving_orphan() {
+    let dir = test_dir("man-id-reuse").await;
+    let reg = FileRegistry::new();
+
+    let removed_id;
+    {
+        let m = Manifest::load(&dir, &reg).await.unwrap();
+        m.create_file("/a.db").unwrap();
+        removed_id = m.create_file("/b.db").unwrap();
+        // Materialise the physical file (create_file only allocates the ID).
+        let f = reg
+            .open(&dir, &format!("{removed_id:016x}"), true, false)
+            .await
+            .unwrap();
+        f.write_at(0, b"orphan-to-be").unwrap();
+        f.flush().unwrap();
+        m.commit().unwrap();
+        m.remove("/b.db").unwrap();
+        m.commit().unwrap();
+    }
+
+    // Keep the orphaned physical file OPEN so load-time GC cannot delete it
+    // (registry-live skip + locked handle both protect it).
+    let held = reg
+        .open(&dir, &format!("{removed_id:016x}"), false, false)
+        .await
+        .unwrap();
+
+    let m2 = Manifest::load(&dir, &reg).await.unwrap();
+    let new_id = m2.create_file("/c.db").unwrap();
+    assert_ne!(
+        new_id, removed_id,
+        "reallocating a surviving orphan's ID would collide with its file"
+    );
+    drop(held);
+}
+
+#[wasm_bindgen_test]
+async fn remove_of_nonempty_dir_is_rejected() {
+    let dir = test_dir("man-rmdir").await;
+    let reg = FileRegistry::new();
+
+    let m = Manifest::load(&dir, &reg).await.unwrap();
+    m.create_file("/d/inner.db").unwrap();
+    let err = m
+        .remove("/d")
+        .err()
+        .expect("non-empty dir remove must fail");
+    assert!(matches!(err, pagedb::errors::PagedbError::Io(_)));
+    // File removes and empty-dir removes still work.
+    m.remove("/d/inner.db").unwrap();
+    m.remove("/d").unwrap();
 }

@@ -16,11 +16,13 @@ setup:
 # Browser suites (dedicated-worker OPFS tests). Browsers required locally.
 # .tools/chromedriver (gitignored) must match the installed Chrome major
 # version; wasm-pack's auto-fetched driver can drift ahead of the browser.
+# Generous per-test timeout: suites are fast in isolation but share the
+# machine with builds/review jobs; timing out under load is pure flake.
 test-chrome:
-    cd harness && wasm-pack test --headless --chrome --chromedriver "{{justfile_directory()}}/.tools/chromedriver"
+    cd harness && WASM_BINDGEN_TEST_TIMEOUT=120 wasm-pack test --headless --chrome --chromedriver "{{justfile_directory()}}/.tools/chromedriver"
 
 test-firefox:
-    cd harness && wasm-pack test --headless --firefox
+    cd harness && WASM_BINDGEN_TEST_TIMEOUT=120 wasm-pack test --headless --firefox
 
 test-browsers: test-chrome test-firefox
 
