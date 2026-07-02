@@ -233,12 +233,28 @@ impl<F: VfsFile + Sync> VfsFile for FaultFile<F> {
         self.inner.write_at(offset, buf).await
     }
 
-    /// Re-implemented per request so the oracle can cut MID-vectored-write.
-    /// The trigger ticks AFTER each sub-write completes: occurrence N parks
-    /// with sub-writes 1..=N already applied and the rest of the batch
-    /// unwritten - the exact partial-batch residual the vectored-write
-    /// carveout accepts.
+    /// Re-implemented per request so the oracle can cut MID-vectored-write,
+    /// mirroring `OpfsFile::write_at_vectored` step for step (validate all
+    /// requests, pre-extend to the batch max end, then sequential
+    /// `write_at`s) so the instrumented path is semantically identical to
+    /// the production method. The trigger ticks AFTER each sub-write
+    /// completes: occurrence N parks with the file pre-extended and
+    /// sub-writes 1..=N applied, the rest unwritten - the exact
+    /// partial-batch residual the vectored-write carveout accepts.
     async fn write_at_vectored(&mut self, reqs: &[WriteReq<'_>]) -> Result<()> {
+        let mut max_end = 0u64;
+        for r in reqs {
+            let end = r.offset.checked_add(r.buf.len() as u64).ok_or_else(|| {
+                PagedbError::Io(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "vectored write offset overflow",
+                ))
+            })?;
+            max_end = max_end.max(end);
+        }
+        if self.inner.len().await? < max_end {
+            self.inner.truncate(max_end).await?;
+        }
         for req in reqs {
             self.inner.write_at(req.offset, req.buf).await.map(|_| ())?;
             self.trig.tick(OpKind::VectoredSubWrite).await?;

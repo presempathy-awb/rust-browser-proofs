@@ -334,3 +334,30 @@ async fn crash_after_slot_write_adopts_new_namespace() {
     assert_eq!(m2.resolve("/new.db"), Some(EntryKind::File(42)));
     assert!(m2.resolve("/old.db").is_some());
 }
+
+/// GC ownership: entries this backend did not coin ({id:016x} names) are
+/// NEVER garbage-collected - the directory may be shared (or be the OPFS
+/// root), and foreign files must survive every load.
+#[wasm_bindgen_test]
+async fn gc_never_touches_unrecognized_entries() {
+    let dir = test_dir("man-foreign").await;
+    let reg = FileRegistry::new();
+
+    // A foreign file some other software placed in the same directory.
+    let f = reg.open(&dir, "user-notes.txt", true, false).await.unwrap();
+    f.write_at(0, b"not ours").unwrap();
+    f.flush().unwrap();
+    drop(f);
+
+    // Several loads (each runs GC) with commits in between.
+    for i in 0..2 {
+        let m = Manifest::load(&dir, &reg).await.unwrap();
+        m.create_file(&format!("/mine-{i}.db")).unwrap();
+        m.commit().unwrap();
+    }
+
+    let f = reg.open(&dir, "user-notes.txt", false, false).await.unwrap();
+    let mut buf = [0u8; 8];
+    assert_eq!(f.read_at(0, &mut buf).unwrap(), 8);
+    assert_eq!(&buf, b"not ours");
+}
