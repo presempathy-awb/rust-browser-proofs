@@ -7,29 +7,22 @@
 
 #![cfg(target_arch = "wasm32")]
 
+mod support;
+
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
 use wasm_bindgen_test::*;
 
 wasm_bindgen_test_configure!(run_in_dedicated_worker);
 
-async fn opfs_root() -> web_sys::FileSystemDirectoryHandle {
-    let global: web_sys::WorkerGlobalScope = js_sys::global().unchecked_into();
-    let storage = global.navigator().storage();
-    JsFuture::from(storage.get_directory())
-        .await
-        .expect("navigator.storage.getDirectory() failed - OPFS unavailable")
-        .unchecked_into()
-}
-
 #[wasm_bindgen_test]
 async fn sync_access_handle_round_trip_in_dedicated_worker() {
-    let root = opfs_root().await;
+    let dir = support::test_dir("smoke-roundtrip").await;
 
     let opts = web_sys::FileSystemGetFileOptions::new();
     opts.set_create(true);
     let fh: web_sys::FileSystemFileHandle =
-        JsFuture::from(root.get_file_handle_with_options("smoke.bin", &opts))
+        JsFuture::from(dir.get_file_handle_with_options("smoke.bin", &opts))
             .await
             .expect("getFileHandle(create) failed")
             .unchecked_into();
@@ -58,7 +51,5 @@ async fn sync_access_handle_round_trip_in_dedicated_worker() {
 
     sah.close();
 
-    JsFuture::from(root.remove_entry("smoke.bin"))
-        .await
-        .expect("removeEntry cleanup failed");
+    support::cleanup_dir("smoke-roundtrip").await;
 }

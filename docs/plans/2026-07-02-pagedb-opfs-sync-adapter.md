@@ -85,8 +85,8 @@ Files being replaced in `pagedb/src/vfs/opfs/` (migration accounting — every f
 
 ## Progress Tracking
 
-- [ ] Task 1: Repos + harness workspace with dedicated-worker OPFS smoke test
-- [ ] Task 2: Sync-handle bindings + refcounted FileRegistry
+- [x] Task 1: Repos + harness workspace with dedicated-worker OPFS smoke test
+- [x] Task 2: Sync-handle bindings + refcounted FileRegistry
 - [ ] Task 3: Manifest — logical namespace with A/B crash protocol
 - [ ] Task 4: OpfsVfs trait rewrite over registry+manifest; delete postMessage proxy
 - [ ] Task 5: Port VFS conformance suite to the browser harness

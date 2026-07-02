@@ -6,3 +6,13 @@ target/
 .DS_Store
 node_modules/
 .tools/
+# Local agent/session state - never repo content
+.cache/
+.omx/
+.remember/
+.codegraph/
+.claude/
+# Harness lockfile: local builds use the .cargo/config.toml path patch, CI
+# resolves the Gitea git dep - a committed lock would flip-flop between the
+# two sources. Regenerate freely; the harness is not a published artifact.
+Cargo.lock

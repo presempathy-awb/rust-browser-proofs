@@ -6,7 +6,7 @@ rust = "1.95"
 jj = "0.41"
 just = "1.52.0"
 "aqua:rustwasm/wasm-pack" = "latest"
-# lefthook is installed system-wide; pin here if that ever changes.
+lefthook = "latest"
 
 [settings]
 experimental = false

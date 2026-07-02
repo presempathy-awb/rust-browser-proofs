@@ -2,9 +2,11 @@
 #
 # Scope: fmt + clippy + native tests + wasm32 compile check.
 # The browser suites (wasm-pack test --headless) run LOCALLY via `just
-# test-browsers` - the runner has no Chrome/Firefox. Fetching the pagedb git
-# dependency requires a runner deploy key with read access to awb/pagedb on
-# this Gitea instance; until that is configured this workflow is best-effort.
+# test-browsers` - the runner has no Chrome/Firefox.
+#
+# The pagedb dependency is a PRIVATE git dep on this Gitea instance, so the
+# runner needs the GITEA_DEPLOY_KEY secret: a read-only deploy key for
+# awb/pagedb (Settings -> Deploy keys). Without it the build fails at fetch.
 name: pagedb-opfs smoke
 
 on: [push, workflow_dispatch]
@@ -12,16 +14,28 @@ on: [push, workflow_dispatch]
 jobs:
   smoke:
     runs-on: ubuntu-latest
+    env:
+      CARGO_NET_GIT_FETCH_WITH_CLI: "true"
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
-      - name: Install Rust + wasm target
+      - name: SSH for private pagedb dep
+        run: |
+          set -eu
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.GITEA_DEPLOY_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -p 2222 git.telpher.stream >> ~/.ssh/known_hosts 2>/dev/null
+      - name: Install Rust 1.95 + wasm target
         run: |
           set -eu
           command -v rustup >/dev/null 2>&1 || {
             curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
-            . "$HOME/.cargo/env"
           }
+          . "$HOME/.cargo/env" 2>/dev/null || true
+          rustup toolchain install 1.95 --profile minimal
+          rustup default 1.95
+          rustup component add rustfmt clippy
           rustup target add wasm32-unknown-unknown
       - name: fmt + clippy + native tests + wasm check
         run: |
