@@ -89,7 +89,7 @@ Files being replaced in `pagedb/src/vfs/opfs/` (migration accounting — every f
 - [x] Task 2: Sync-handle bindings + refcounted FileRegistry
 - [x] Task 3: Manifest — logical namespace with A/B crash protocol
 - [x] Task 4: OpfsVfs trait rewrite over registry+manifest; delete postMessage proxy
-- [ ] Task 5: Port VFS conformance suite to the browser harness
+- [x] Task 5: Port VFS conformance suite to the browser harness
 - [ ] Task 6: Engine suites (smoke/txn/btree/segment/crash/recovery/page-sizes) in browser
 - [ ] Task 7: Crash & durability oracle + native↔browser receipt parity
 - [ ] Task 8: Post-header metadata error-swallowing audit (upstream)
