@@ -293,3 +293,47 @@ async fn namespace_invariants_are_enforced() {
     // mkdir_all over an existing file path is rejected.
     assert!(m.mkdir_all("/d/file.db").is_err());
 }
+
+/// The two on-disk states a crash INSIDE Manifest::commit can leave are
+/// both pinned: a torn slot (covered by the torn-slot tests above) and a
+/// fully-written valid slot whose in-memory adoption was lost with the
+/// worker. This test pins the second: the slot WRITE is the publication
+/// point - a next-seq record present on disk is adopted by recovery even
+/// though the committing instance never flipped its in-memory state.
+#[wasm_bindgen_test]
+async fn crash_after_slot_write_adopts_new_namespace() {
+    use pagedb::vfs::opfs::manifest::{ManifestRecord, encode_manifest};
+
+    let dir = test_dir("man-slot-publish").await;
+    let reg = FileRegistry::new();
+
+    let m = Manifest::load(&dir, &reg).await.unwrap();
+    m.create_file("/old.db").unwrap();
+    m.commit().unwrap(); // seq 1
+    let inactive = if m.active_slot_name() == Manifest::SLOT_A {
+        Manifest::SLOT_B
+    } else {
+        Manifest::SLOT_A
+    };
+    drop(m);
+
+    // Simulate: next commit wrote its full record to the inactive slot,
+    // then the worker died before doing anything else.
+    let rec = ManifestRecord {
+        seq: 2,
+        entries: vec![
+            ("/new.db".to_string(), EntryKind::File(42)),
+            ("/old.db".to_string(), EntryKind::File(1)),
+        ],
+    };
+    let bytes = encode_manifest(&rec).unwrap();
+    let f = reg.open(&dir, inactive, true, false).await.unwrap();
+    f.truncate(0).unwrap();
+    f.write_at(0, &bytes).unwrap();
+    f.flush().unwrap();
+    drop(f);
+
+    let m2 = Manifest::load(&dir, &reg).await.unwrap();
+    assert_eq!(m2.resolve("/new.db"), Some(EntryKind::File(42)));
+    assert!(m2.resolve("/old.db").is_some());
+}

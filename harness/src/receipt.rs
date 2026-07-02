@@ -11,7 +11,7 @@ use pagedb::{Db, RealmId, SegmentKind, SegmentPageKind};
 
 /// Pinned by tests/receipt_native.rs; asserted equal by the browser test.
 pub const EXPECTED_RECEIPT: &str =
-    "fe816e9d3945197858e644b5df53e570994efc9bba909d791571730dabc52a38";
+    "42649b2924cfa2c47d7dee7340f179e5718517660f50e9c40fdab46680cf7676";
 
 pub const PAGE: usize = 4096;
 pub const KEK: [u8; 32] = [7u8; 32];
@@ -74,26 +74,31 @@ pub async fn run_script<V: Vfs + Clone>(db: &Db<V>) {
     t.commit().await.unwrap();
 }
 
-/// BLAKE3 receipt over the script's committed observable state.
+/// BLAKE3 receipt over the script's committed observable state: an ORDERED
+/// prefix scan (count + every key/value pair - extra or missing keys and
+/// ordering bugs change the hash), explicit absence probes for the deleted
+/// keys, and the full segment (page count + every data page).
 pub async fn compute_receipt<V: Vfs + Clone>(db: &Db<V>) -> String {
     let mut h = blake3::Hasher::new();
     let r = db.begin_read().await.unwrap();
-    for i in 0..40u32 {
-        let k = format!("script-key-{i:03}");
-        h.update(k.as_bytes());
-        match r.get(k.as_bytes()).await.unwrap() {
-            Some(v) => {
-                h.update(b"=");
-                h.update(&v);
-            }
-            None => {
-                h.update(b"<absent>");
-            }
-        }
+    let pairs = r.scan(b"script-key-", b"script-key-\x7f").await.unwrap();
+    h.update(&(pairs.len() as u64).to_le_bytes());
+    for (k, v) in &pairs {
+        h.update(k);
+        h.update(b"=");
+        h.update(v);
         h.update(b"\n");
+    }
+    // Deleted keys must be absent (scan omission alone could also mean a
+    // range bug; probe them explicitly).
+    for i in 20..25u32 {
+        let k = format!("script-key-{i:03}");
+        assert!(r.get(k.as_bytes()).await.unwrap().is_none(), "{k} undead");
+        h.update(b"absent\n");
     }
     drop(r);
     let reader = db.open_segment(REALM, "receipt.seg").await.unwrap();
+    h.update(&reader.meta().page_count.to_le_bytes());
     for p in 1..=3u64 {
         h.update(&reader.read_page(p).await.unwrap());
     }

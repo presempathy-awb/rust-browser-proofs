@@ -128,18 +128,18 @@ async fn reopen_with_retry(root: &str) -> Db<OpfsVfs> {
     for attempt in 0..100u32 {
         let vfs = match OpfsVfs::with_root(root).await {
             Ok(v) => v,
-            Err(_) if attempt < 99 => {
+            Err(PagedbError::AlreadyLocked) if attempt < 99 => {
                 sleep_ms(100).await;
                 continue;
             }
-            Err(e) => panic!("vfs reopen failed after retries: {e:?}"),
+            Err(e) => panic!("vfs reopen failed: {e:?}"),
         };
         match Db::open_existing(vfs, KEK, PAGE, REALM).await {
             Ok(db) => return db,
+            // ONLY lock-release latency is retryable (a terminated worker's
+            // sync access handles unlock asynchronously). Anything else is
+            // a real recovery bug and must fail the oracle immediately.
             Err(PagedbError::AlreadyLocked) | Err(PagedbError::AlreadyOpen) => {
-                sleep_ms(100).await;
-            }
-            Err(PagedbError::Io(_)) if attempt < 99 => {
                 sleep_ms(100).await;
             }
             Err(e) => panic!("reopen failed: {e:?}"),

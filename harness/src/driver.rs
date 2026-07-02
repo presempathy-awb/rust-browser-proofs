@@ -21,6 +21,12 @@ pub const PAGE: usize = 4096;
 pub const KEK: [u8; 32] = [5u8; 32];
 pub const REALM: RealmId = RealmId::new([2u8; 16]);
 
+/// Phase -> (op, occurrence) against the ARMED commit's op sequence
+/// (src/txn/write/commit.rs): flush_main vectored writes + sync#1 ->
+/// header write#1 + sync#2 -> setup sync_dir("seg")#1 +
+/// sync_dir(".tombstone")#2 -> rename#1 (promote) -> sync_dir("seg")#3
+/// (the promote's durability point) -> sync_dir(".tombstone")#4 (last).
+/// mid-vectored-write parks AFTER sub-write 1 completes (mid-batch).
 fn parse_kind(phase: &str) -> Option<(OpKind, u64)> {
     Some(match phase {
         "mid-vectored-write" => (OpKind::VectoredSubWrite, 1),
@@ -28,8 +34,12 @@ fn parse_kind(phase: &str) -> Option<(OpKind, u64)> {
         "pages-synced-pre-header-write" => (OpKind::Write, 1),
         "header-written-pre-sync" => (OpKind::Sync, 2),
         "header-synced-pre-rename" => (OpKind::Rename, 1),
-        "during-sync-dir" => (OpKind::SyncDirBefore, 1),
-        "after-sync-dir-pre-gc" => (OpKind::SyncDirAfter, 1),
+        // Rename applied in manifest MEMORY, its committing sync_dir
+        // ("seg" #3, post-promote) not yet executed: the true
+        // mid-metadata-publication cut.
+        "during-sync-dir" => (OpKind::SyncDirBefore, 3),
+        // After the LAST metadata sync (".tombstone" #4): published.
+        "after-sync-dir-pre-gc" => (OpKind::SyncDirAfter, 4),
         _ => return None,
     })
 }

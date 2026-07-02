@@ -92,7 +92,7 @@ Files being replaced in `pagedb/src/vfs/opfs/` (migration accounting — every f
 - [x] Task 5: Port VFS conformance suite to the browser harness
 - [x] Task 6: Engine suites (smoke/txn/btree/segment/crash/recovery/page-sizes) in browser
 - [ ] Task 7: Crash & durability oracle + native↔browser receipt parity
-- [ ] Task 8: Post-header metadata error-swallowing audit (upstream)
+- [x] Task 8: Post-header metadata error-swallowing audit (upstream)
 - [ ] Task 9: Upstream PR draft + documentation sync
 
 ## Implementation Tasks
