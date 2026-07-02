@@ -234,10 +234,14 @@ impl<F: VfsFile + Sync> VfsFile for FaultFile<F> {
     }
 
     /// Re-implemented per request so the oracle can cut MID-vectored-write.
+    /// The trigger ticks AFTER each sub-write completes: occurrence N parks
+    /// with sub-writes 1..=N already applied and the rest of the batch
+    /// unwritten - the exact partial-batch residual the vectored-write
+    /// carveout accepts.
     async fn write_at_vectored(&mut self, reqs: &[WriteReq<'_>]) -> Result<()> {
         for req in reqs {
-            self.trig.tick(OpKind::VectoredSubWrite).await?;
             self.inner.write_at(req.offset, req.buf).await.map(|_| ())?;
+            self.trig.tick(OpKind::VectoredSubWrite).await?;
         }
         self.trig.tick(OpKind::VectoredWrite).await?;
         Ok(())

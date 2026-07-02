@@ -5,6 +5,7 @@ Author: awb@presempathy.com
 Agent: Claude Code
 Category: Infrastructure
 Status: Final
+Delivery: M1 DELIVERED 2026-07-02 — in-worker sync backend (registry + manifest + OpfsVfs), 59 browser tests green (Chromium + Firefox) incl. 7-cut worker-terminate crash oracle and native<->browser receipt parity; upstream branch feat/opfs-sync-backend + PR draft docs/pr/2026-07-opfs-sync-backend.md. M2 (Web Locks, Mode 2 facade, bootstrap, benches, WebKit) not started.
 Research: Deep (partial — verification pass truncated by spend limit; primary-source extractions retained with citations, unresolved items flagged §Verify-during-/spec)
 Review: Codex adversarial reviews 2026-07-02 — pass 1 (task-mr3jsedb-h2mbbh, 9 findings), pass 2 (task-mr3lcoda-p2zxp9, 4), pass 3 (task-mr3lmktu-2yftzh, 4), pass 4 (task-mr3luhl0-civ2rp, 3), pass 5 (task-mr3m1z1w-i3xu1s, **SHIP — no must_fix findings**). All findings applied.
 
