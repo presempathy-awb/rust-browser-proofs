@@ -15,11 +15,13 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 pagedb = { git = "ssh://git@git.telpher.stream:2222/awb/pagedb.git", branch = "feat/opfs-sync-backend", features = ["opfs"] }
+blake3 = "1"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 js-sys = "0.3"
+send_wrapper = { version = "0.6", features = ["futures"] }
 web-sys = { version = "0.3", features = [
     "WorkerGlobalScope",
     "WorkerNavigator",
@@ -35,6 +37,11 @@ web-sys = { version = "0.3", features = [
     "WorkerOptions",
     "WorkerType",
     "MessageEvent",
+    "DedicatedWorkerGlobalScope",
+    "ErrorEvent",
+    "WorkerLocation",
+    "Blob",
+    "Url",
 ] }
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]

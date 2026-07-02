@@ -18,10 +18,15 @@ setup:
 # version; wasm-pack's auto-fetched driver can drift ahead of the browser.
 # Generous per-test timeout: suites are fast in isolation but share the
 # machine with builds/review jobs; timing out under load is pure flake.
-test-chrome:
+# The crash oracle embeds a second, self-contained wasm bundle (the
+# sacrificial worker's driver) built from the harness lib itself.
+build-driver:
+    cd harness && wasm-pack build --dev --target no-modules --no-typescript --out-dir pkg-driver
+
+test-chrome: build-driver
     cd harness && WASM_BINDGEN_TEST_TIMEOUT=120 wasm-pack test --headless --chrome --chromedriver "{{justfile_directory()}}/.tools/chromedriver"
 
-test-firefox:
+test-firefox: build-driver
     cd harness && WASM_BINDGEN_TEST_TIMEOUT=120 wasm-pack test --headless --firefox
 
 test-browsers: test-chrome test-firefox
