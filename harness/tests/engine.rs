@@ -60,8 +60,9 @@ async fn kv_many_commits_then_reopen_serves_all() {
         .await
         .unwrap();
     let r = db.begin_read().await.unwrap();
+    // FULL readback: every committed key, exact value.
     for batch in 0..3u32 {
-        for i in (0..50u32).step_by(7) {
+        for i in 0..50u32 {
             let k = format!("key-{batch:02}-{i:04}");
             let expect = format!("val-{batch}-{i}");
             assert_eq!(
@@ -72,6 +73,24 @@ async fn kv_many_commits_then_reopen_serves_all() {
         }
     }
     assert!(r.get(b"ghost").await.unwrap().is_none());
+    // Ordered range scan across the B+tree (btree_basic forward-scan port).
+    let hits = r.scan(b"key-01-0000", b"key-01-0010").await.unwrap();
+    assert_eq!(hits.len(), 10);
+    assert!(hits.windows(2).all(|w| w[0].0 < w[1].0), "scan unsorted");
+    assert_eq!(hits[0].0, b"key-01-0000".to_vec());
+    drop(r);
+
+    // Delete + overwrite paths survive a further commit and read back.
+    let mut w = db.begin_write().await.unwrap();
+    assert!(w.delete(b"key-00-0001").await.unwrap());
+    w.put(b"key-00-0002", b"updated").await.unwrap();
+    w.commit().await.unwrap();
+    let r = db.begin_read().await.unwrap();
+    assert!(r.get(b"key-00-0001").await.unwrap().is_none());
+    assert_eq!(
+        r.get(b"key-00-0002").await.unwrap().as_deref(),
+        Some(b"updated".as_ref())
+    );
 }
 
 /// segment_basic port: create -> append -> set_manifest -> seal -> link ->
@@ -216,4 +235,124 @@ async fn spill_scratch_reopen_stress() {
         r.get(b"round-19").await.unwrap().as_deref(),
         Some(b"done".as_ref())
     );
+}
+
+fn hex_lower(bytes: &[u8; 16]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// recovery_basic port: an unlinked segment stays readable through a pinned
+/// reader snapshot; after the reader drops, gc_now reclaims it (tombstone
+/// rename + delete through the manifest).
+#[wasm_bindgen_test]
+async fn deferred_tombstone_pins_under_reader_then_gc() {
+    let root = "eng-tombstone-pin";
+    let db = Db::open_internal(fresh_root(root).await, KEK, PAGE, REALM)
+        .await
+        .unwrap();
+    let mut w = db
+        .create_segment(REALM, SegmentKind::Unspecified)
+        .await
+        .unwrap();
+    w.append_page(SegmentPageKind::Data, b"pinned")
+        .await
+        .unwrap();
+    let m = w.seal().await.unwrap();
+    {
+        let mut t = db.begin_write().await.unwrap();
+        t.link_segment("name", &m).await.unwrap();
+        t.commit().await.unwrap();
+    }
+    let snapshot = db.begin_read().await.unwrap();
+    {
+        let mut t = db.begin_write().await.unwrap();
+        t.unlink_segment("name").await.unwrap();
+        t.commit().await.unwrap();
+    }
+    // Reader-pinned: still accessible via the snapshot.
+    let r = snapshot.open_segment("name").await.unwrap();
+    assert!(r.read_page(1).await.unwrap().starts_with(b"pinned"));
+    drop(r);
+    drop(snapshot);
+    let stats = db.gc_now().await.unwrap();
+    assert!(stats.reclaimed_segments >= 1);
+}
+
+/// recovery_basic port + reopen: tombstoned segments are reclaimed by
+/// gc_now and stay gone across a full OPFS reopen.
+#[wasm_bindgen_test]
+async fn gc_now_deletes_tombstones_and_stays_clean_on_reopen() {
+    let root = "eng-tombstone-gc";
+    {
+        let db = Db::open_internal(fresh_root(root).await, KEK, PAGE, REALM)
+            .await
+            .unwrap();
+        let mut w = db
+            .create_segment(REALM, SegmentKind::Unspecified)
+            .await
+            .unwrap();
+        w.append_page(SegmentPageKind::Data, b"x").await.unwrap();
+        let m = w.seal().await.unwrap();
+        {
+            let mut t = db.begin_write().await.unwrap();
+            t.link_segment("dead", &m).await.unwrap();
+            t.commit().await.unwrap();
+        }
+        {
+            let mut t = db.begin_write().await.unwrap();
+            t.unlink_segment("dead").await.unwrap();
+            t.commit().await.unwrap();
+        }
+        let stats = db.gc_now().await.unwrap();
+        assert!(stats.reclaimed_segments >= 1);
+        let err = db.open_segment(REALM, "dead").await.err().unwrap();
+        assert!(matches!(err, pagedb::PagedbError::NotFound));
+    }
+    let db = Db::open_existing(reopen_root(root).await, KEK, PAGE, REALM)
+        .await
+        .unwrap();
+    let err = db.open_segment(REALM, "dead").await.err().unwrap();
+    assert!(matches!(err, pagedb::PagedbError::NotFound));
+}
+
+/// crash_basic port: simulate the crash window between the link commit's
+/// header fsync and the staging->live rename by renaming the LIVE file
+/// back to staging, then reopening. Reconciliation must promote it.
+#[wasm_bindgen_test]
+async fn link_commit_then_rename_staging_recovers() {
+    use pagedb::vfs::{OpenMode, Vfs};
+
+    let root = "eng-reconcile";
+    let vfs = fresh_root(root).await;
+    let segment_id_hex;
+    {
+        let db = Db::open_internal(vfs.clone(), KEK, PAGE, REALM)
+            .await
+            .unwrap();
+        let mut w = db
+            .create_segment(REALM, SegmentKind::Unspecified)
+            .await
+            .unwrap();
+        w.append_page(SegmentPageKind::Data, b"recovered")
+            .await
+            .unwrap();
+        let meta = w.seal().await.unwrap();
+        segment_id_hex = hex_lower(&meta.segment_id);
+        let mut t = db.begin_write().await.unwrap();
+        t.link_segment("name", &meta).await.unwrap();
+        t.commit().await.unwrap();
+    }
+    // The crash window: live file back to staging (manifest rename).
+    let live = format!("seg/{segment_id_hex}");
+    let staging = format!("seg/.staging/{segment_id_hex}");
+    vfs.rename(&live, &staging).await.unwrap();
+
+    let db = Db::open_existing(vfs.clone(), KEK, PAGE, REALM)
+        .await
+        .unwrap();
+    // Reconcile found the catalog row, missed the live file, promoted staging.
+    let f = vfs.open(&live, OpenMode::Read).await.unwrap();
+    drop(f);
+    let r = db.open_segment(REALM, "name").await.unwrap();
+    assert!(r.read_page(1).await.unwrap().starts_with(b"recovered"));
 }
