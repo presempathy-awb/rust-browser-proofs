@@ -141,3 +141,39 @@ async fn quota_exhaustion_is_typed_not_a_trap() {
     f.write_at(0, b"ok").unwrap();
     assert_eq!(f.size().unwrap(), 2);
 }
+
+#[wasm_bindgen_test]
+async fn writes_report_full_length() {
+    let dir = test_dir("reg-writeall").await;
+    let reg = FileRegistry::new();
+
+    let f = reg.open(&dir, "w.bin", true, false).await.unwrap();
+    let big = vec![0xa5u8; 256 * 1024];
+    // write_at is write-all: anything less than the full buffer is a bug.
+    assert_eq!(f.write_at(0, &big).unwrap(), big.len());
+    f.flush().unwrap();
+    assert_eq!(f.size().unwrap(), big.len() as u64);
+}
+
+#[wasm_bindgen_test]
+async fn beyond_js_safe_integer_is_rejected_typed() {
+    let dir = test_dir("reg-2p53").await;
+    let reg = FileRegistry::new();
+
+    let f = reg.open(&dir, "s.bin", true, false).await.unwrap();
+    let over = 1u64 << 53; // MAX_SAFE_INTEGER + 1
+    let werr = f.write_at(over, b"x").err().unwrap();
+    assert!(
+        matches!(&werr, PagedbError::Io(e) if e.kind() == std::io::ErrorKind::InvalidInput),
+        "expected InvalidInput, got {werr:?}"
+    );
+    let terr = f.truncate(over).err().unwrap();
+    assert!(
+        matches!(&terr, PagedbError::Io(e) if e.kind() == std::io::ErrorKind::InvalidInput),
+        "expected InvalidInput, got {terr:?}"
+    );
+    // Handle still healthy afterwards; durable write proves it.
+    assert_eq!(f.write_at(0, b"ok").unwrap(), 2);
+    f.flush().unwrap();
+    assert_eq!(f.size().unwrap(), 2);
+}

@@ -87,7 +87,7 @@ Files being replaced in `pagedb/src/vfs/opfs/` (migration accounting — every f
 
 - [x] Task 1: Repos + harness workspace with dedicated-worker OPFS smoke test
 - [x] Task 2: Sync-handle bindings + refcounted FileRegistry
-- [ ] Task 3: Manifest — logical namespace with A/B crash protocol
+- [x] Task 3: Manifest — logical namespace with A/B crash protocol
 - [ ] Task 4: OpfsVfs trait rewrite over registry+manifest; delete postMessage proxy
 - [ ] Task 5: Port VFS conformance suite to the browser harness
 - [ ] Task 6: Engine suites (smoke/txn/btree/segment/crash/recovery/page-sizes) in browser
@@ -175,7 +175,7 @@ Files being replaced in `pagedb/src/vfs/opfs/` (migration accounting — every f
 - [ ] Native: codec unit tests pass (`cargo test -p pagedb manifest` in the pagedb checkout)
 - [ ] Browser: mutate namespace → `sync_dir` → drop everything → reload picks up exactly the committed namespace; a deliberately corrupted (garbage-overwritten) inactive slot never affects recovery, and a corrupted ACTIVE slot recovers to the other slot's seq
 - [ ] Browser: an orphaned physical file (created, never committed to manifest) is removed on next load
-- [ ] Verify: `cargo test -p pagedb manifest` (native, in pagedb checkout) && `just test-chrome && just test-firefox`
+- [ ] Verify: `cargo test --lib --features opfs codec_tests` (native, in the fork; `vfs::opfs` is feature-gated so the codec needs `--features opfs`) && `just test-chrome && just test-firefox`
 
 ### Task 4: OpfsVfs trait rewrite over registry+manifest; delete postMessage proxy
 

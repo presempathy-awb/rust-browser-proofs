@@ -6,7 +6,7 @@ rust = "1.95"
 jj = "0.41"
 just = "1.52.0"
 "aqua:rustwasm/wasm-pack" = "latest"
-lefthook = "latest"
+lefthook = "2.1.9"
 
 [settings]
 experimental = false
