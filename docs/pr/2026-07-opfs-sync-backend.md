@@ -2,7 +2,7 @@
 
 **Branch:** `feat/opfs-sync-backend` (base: `main` @ `0d78cfe`)
 **Target:** NodeDB-Lab/pagedb (submission by repo owner; this document is the PR description)
-**Companion test harness:** `pagedb-opfs` (git.telpher.stream/awb/pagedb-opfs) — browser suites, crash oracle, receipt parity
+**Companion test harness:** `pagedb-opfs` (github.com/presempathy-awb/pagedb-opfs) — browser suites, crash oracle, receipt parity
 
 ## Motivation
 

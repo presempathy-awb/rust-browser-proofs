@@ -37,7 +37,7 @@ just test-native    # native-side tests (codec, receipt reference)
 ```
 
 > **Dependency note:** `harness/Cargo.toml` pins pagedb to the
-> `feat/opfs-sync-backend` branch on a private Gitea remote. Until that
+> `feat/opfs-sync-backend` branch on the author's private remote. Until that
 > branch lands upstream, point the `pagedb` git dependency (or a
 > `.cargo/config.toml` `[patch]`) at your own checkout of the branch.
 
