@@ -7,6 +7,8 @@
 //! per-test names plus pre-clean deliver that.
 
 #![cfg(target_arch = "wasm32")]
+// Shared across test binaries; not every binary uses every helper.
+#![allow(dead_code)]
 
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;

@@ -162,17 +162,18 @@ async fn run_kill_phase(root: &str, phase: &str, expect: Expect) {
     let (worker, msgs) = spawn_oracle_worker(root, phase);
     // Wait for the phase beacon (or a driver error).
     let mut beacon = None;
-    'outer: for _ in 0..600 {
-        while let Some(m) = {
+    for _ in 0..600 {
+        let msg = {
             let mut b = msgs.borrow_mut();
             if b.is_empty() {
                 None
             } else {
                 Some(b.remove(0))
             }
-        } {
+        };
+        if let Some(m) = msg {
             beacon = Some(m);
-            break 'outer;
+            break;
         }
         sleep_ms(50).await;
     }
@@ -314,7 +315,7 @@ async fn run_error_injection(root: &str, kind: OpKind, at: u64, published: bool)
         w.put(b"victim", b"should-not-commit").await.unwrap();
         w.link_segment("inject.seg", &meta).await.unwrap();
         vfs.arm();
-        let err = w.commit().await.err().expect("injected fault must surface");
+        let err = w.commit().await.expect_err("injected fault must surface");
         assert!(matches!(err, PagedbError::Io(_)), "typed error expected");
         assert!(vfs.fired(), "trigger did not fire");
     }

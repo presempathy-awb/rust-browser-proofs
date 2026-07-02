@@ -264,10 +264,7 @@ async fn remove_of_nonempty_dir_is_rejected() {
 
     let m = Manifest::load(&dir, &reg).await.unwrap();
     m.create_file("/d/inner.db").unwrap();
-    let err = m
-        .remove("/d")
-        .err()
-        .expect("non-empty dir remove must fail");
+    let err = m.remove("/d").expect_err("non-empty dir remove must fail");
     assert!(matches!(err, pagedb::errors::PagedbError::Io(_)));
     // File removes and empty-dir removes still work.
     m.remove("/d/inner.db").unwrap();
