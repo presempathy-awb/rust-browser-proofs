@@ -90,10 +90,8 @@ async fn list_dir_returns_direct_children_only() {
 
     let mut names = m.list_dir("/d").unwrap();
     names.sort();
-    assert_eq!(
-        names,
-        vec!["a".to_string(), "b".to_string(), "sub".to_string()]
-    );
+    // File children only (MemVfs reference semantic): "sub" is a Dir.
+    assert_eq!(names, vec!["a".to_string(), "b".to_string()]);
 }
 
 #[wasm_bindgen_test]
@@ -274,4 +272,24 @@ async fn remove_of_nonempty_dir_is_rejected() {
     // File removes and empty-dir removes still work.
     m.remove("/d/inner.db").unwrap();
     m.remove("/d").unwrap();
+}
+
+#[wasm_bindgen_test]
+async fn namespace_invariants_are_enforced() {
+    let dir = test_dir("man-invariants").await;
+    let reg = FileRegistry::new();
+    let m = Manifest::load(&dir, &reg).await.unwrap();
+
+    m.create_file("/d/file.db").unwrap();
+    m.mkdir_all("/d/subdir").unwrap();
+
+    // Directory rename is rejected (would strand descendants).
+    assert!(m.rename("/d", "/e").is_err());
+    // Renaming onto a directory destination is rejected.
+    assert!(m.rename("/d/file.db", "/d/subdir").is_err());
+    // A file cannot serve as a parent directory.
+    assert!(m.create_file("/d/file.db/child").is_err());
+    assert!(m.mkdir_all("/d/file.db/sub").is_err());
+    // mkdir_all over an existing file path is rejected.
+    assert!(m.mkdir_all("/d/file.db").is_err());
 }

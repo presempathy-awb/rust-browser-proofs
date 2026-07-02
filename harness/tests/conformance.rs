@@ -193,10 +193,9 @@ async fn list_dir_returns_direct_children() {
     vfs.open("/d/sub/deep", OpenMode::CreateNew).await.unwrap();
     let mut entries = vfs.list_dir("/d").await.unwrap();
     entries.sort(); // trait: order unspecified
-    assert_eq!(
-        entries,
-        vec!["a".to_string(), "b".to_string(), "sub".to_string()]
-    );
+    // 1:1 with vfs_memory.rs: direct FILE children only - the implied
+    // "sub" directory is not listed by the reference semantic.
+    assert_eq!(entries, vec!["a".to_string(), "b".to_string()]);
 }
 
 #[wasm_bindgen_test]
