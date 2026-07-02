@@ -1,0 +1,32 @@
+# agents.toml - single source of truth for pagedb-opfs AI assistant instructions.
+# pagedb-opfs is a telpher-family repo; this file mirrors the gitspen
+# agents.toml shape but carries this repo's own domain. Do not copy gitspen
+# or FAS domain rules here.
+
+[meta]
+project = "pagedb-opfs"
+canonical_reference = """
+pagedb-opfs = the browser test harness + durability oracle for pagedb's OPFS
+storage backend. The backend implementation itself lives in the pagedb fork
+at ~/code/pres/vendor/pagedb (branch feat/opfs-sync-backend), developed here
+and PR'd upstream to github.com/NodeDB-Lab/pagedb. The reference upstream
+checkout at ~/src/lodefolio/data/databases/pagedb is pristine - never edit it.
+PRD: docs/prd/2026-07-02-pagedb-opfs-adapter.md. Plan: docs/plans/.
+"""
+
+[vcs]
+notes = """
+jj-colocated, jj-first (jj new / jj describe / jj bookmark). Gitea origin:
+ssh://git@git.telpher.stream:2222/awb/pagedb-opfs.git. The vendor pagedb fork
+stays plain git (upstream PR discipline); its remotes: origin = NodeDB-Lab
+GitHub (PR target, never push), gitea = user's fork mirror (push allowed).
+"""
+
+[testing]
+notes = """
+Browser suites run via `just test-chrome` / `just test-firefox` (wasm-pack,
+headless, dedicated worker - OPFS sync access handles exist nowhere else).
+Native-side tests via `just test-native`. Every browser test must isolate its
+OPFS namespace (unique subdirectory) and clean up - origin state persists
+across tests in one browser session.
+"""

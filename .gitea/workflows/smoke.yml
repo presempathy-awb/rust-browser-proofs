@@ -1,0 +1,33 @@
+# pagedb-opfs smoke - Gitea Actions (modeled on telpher-smoke.yml).
+#
+# Scope: fmt + clippy + native tests + wasm32 compile check.
+# The browser suites (wasm-pack test --headless) run LOCALLY via `just
+# test-browsers` - the runner has no Chrome/Firefox. Fetching the pagedb git
+# dependency requires a runner deploy key with read access to awb/pagedb on
+# this Gitea instance; until that is configured this workflow is best-effort.
+name: pagedb-opfs smoke
+
+on: [push, workflow_dispatch]
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Install Rust + wasm target
+        run: |
+          set -eu
+          command -v rustup >/dev/null 2>&1 || {
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+            . "$HOME/.cargo/env"
+          }
+          rustup target add wasm32-unknown-unknown
+      - name: fmt + clippy + native tests + wasm check
+        run: |
+          set -eu
+          . "$HOME/.cargo/env" 2>/dev/null || true
+          cargo fmt --all -- --check
+          cargo clippy --workspace --all-targets -- -D warnings
+          cargo test --workspace
+          cargo check -p pagedb-opfs-harness --target wasm32-unknown-unknown

@@ -1,0 +1,8 @@
+target/
+# Local-only cargo override: [patch] pointing the pagedb git dep at the
+# local fork clone (~/code/pres/vendor/pagedb). CI builds from the Gitea fork.
+.cargo/config.toml
+.env
+.DS_Store
+node_modules/
+.tools/

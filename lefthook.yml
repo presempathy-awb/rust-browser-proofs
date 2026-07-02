@@ -1,0 +1,10 @@
+# lefthook - git hooks (installed via `just setup` -> `lefthook install`)
+pre-commit:
+  commands:
+    fmt-check:
+      run: cargo fmt --all -- --check
+
+pre-push:
+  commands:
+    clippy:
+      run: cargo clippy --workspace --all-targets -- -D warnings
