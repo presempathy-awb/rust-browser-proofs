@@ -263,3 +263,32 @@ async fn idb_vfs_aborted_namespace_sync_keeps_new_paths_unpublished() {
         .await
         .unwrap();
 }
+
+#[wasm_bindgen_test]
+async fn idb_vfs_sync_dir_collects_unreferenced_file_records() {
+    let root = format!("orphan-gc-{}", js_sys::Date::now());
+    let database = format!("pagedb-idb-vfs:{root}");
+    let vfs = IdbVfs::with_root(&root).await.unwrap();
+    let mut live = vfs.open("live", OpenMode::CreateNew).await.unwrap();
+    live.write_at(0, b"live").await.unwrap();
+    live.sync().await.unwrap();
+    vfs.sync_dir("/").await.unwrap();
+
+    let store = IdbStore::open(&database).await.unwrap();
+    store.store_file(999, b"orphan").await.unwrap();
+    assert_eq!(
+        store.load_file(999).await.unwrap(),
+        Some(b"orphan".to_vec())
+    );
+    store.close();
+
+    vfs.sync_dir("/").await.unwrap();
+
+    let store = IdbStore::open(&database).await.unwrap();
+    assert_eq!(store.load_file(0).await.unwrap(), Some(b"live".to_vec()));
+    assert_eq!(store.load_file(999).await.unwrap(), None);
+    store.close();
+    drop(live);
+    drop(vfs);
+    IdbStore::delete(&database).await.unwrap();
+}
