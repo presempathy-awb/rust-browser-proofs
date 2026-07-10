@@ -27,6 +27,7 @@ exist) in headless Chromium and Firefox.
 | `idb_crash` | 4 | Real browser worker termination before, during, and after `IdbVfs` namespace publication plus after a PageDB header write before its persistence sync: unpublished paths stay hidden and reclaimable, published paths reopen, and the pre-header-sync database recovers exactly the prior commit in Firefox and Chromium |
 | `idb_receipt` | 1 | Opt-in local PageDB `IdbVfs` engine receipt parity across a full Firefox and Chromium reopen; it is not a selectable fallback |
 | `idb_cross_worker` | 1 | Firefox and Chromium cross-worker writer-lock contention and post-termination release for `IdbVfs`; it is not a selectable fallback |
+| `idb_cross_tab` | 1 | Firefox and Chromium same-origin opener/popup proof of the exact `IdbVfs` Web Locks name and fail-fast protocol: a second tab contends, then acquires after the popup closes; `IdbVfs` itself remains worker-only |
 
 The upstream PR description lives at
 [`docs/pr/2026-07-opfs-sync-backend.md`](docs/pr/2026-07-opfs-sync-backend.md);
@@ -42,8 +43,8 @@ just setup          # toolchain, wasm target, hooks
 just check-chrome-driver # fast local ChromeDriver preflight
 just test-chrome    # all suites, headless Chromium
 just test-firefox   # default suites, headless Firefox
-just test-idb-chrome # local-only IDB spike, VFS, file-sync crash, receipt, and cross-worker lock proof
-just test-idb-firefox # local-only IDB spike, VFS, file-sync crash, receipt, and cross-worker lock proof
+just test-idb-chrome # local-only IDB spike, VFS, file-sync crash, receipt, and cross-worker/cross-tab lock proof
+just test-idb-firefox # local-only IDB spike, VFS, file-sync crash, receipt, and cross-worker/cross-tab lock proof
 just test-native    # native-side tests (codec, receipt reference)
 ```
 
@@ -58,7 +59,7 @@ settings.
 > `.cargo/config.toml` `[patch]`) at your own checkout of the branch.
 
 > **Local IDB spike:** `idb_store`, `idb_vfs`, `idb_receipt`, and
-> `idb_cross_worker` require the local-only `codex/idb-vfs-fallback` PageDB
+> `idb_cross_worker` and `idb_cross_tab` require the local-only `codex/idb-vfs-fallback` PageDB
 > branch and are deliberately excluded from CI; run `just test-idb-chrome` and
 > `just test-idb-firefox`.
 > None makes fallback selection available.
