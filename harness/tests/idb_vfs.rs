@@ -2,10 +2,27 @@
 
 #![cfg(all(target_arch = "wasm32", feature = "idb-vendor-spike"))]
 
+use pagedb::errors::PagedbError;
 use pagedb::vfs::{IdbStore, IdbVfs, OpenMode, ReadReq, Vfs, VfsFile, WriteReq};
+use wasm_bindgen::prelude::wasm_bindgen;
 use wasm_bindgen_test::*;
 
 wasm_bindgen_test_configure!(run_in_dedicated_worker);
+
+#[wasm_bindgen(inline_js = r#"
+export function abort_next_idb_put() {
+  const original = IDBObjectStore.prototype.put;
+  IDBObjectStore.prototype.put = function (...args) {
+    IDBObjectStore.prototype.put = original;
+    const request = original.apply(this, args);
+    this.transaction.abort();
+    return request;
+  };
+}
+"#)]
+extern "C" {
+    fn abort_next_idb_put();
+}
 
 #[wasm_bindgen_test]
 async fn idb_vfs_persists_rename_while_open_across_reopen() {
@@ -192,6 +209,56 @@ async fn idb_vfs_lists_direct_files_and_removes_idempotently() {
     assert!(vfs.open("d/a", OpenMode::Read).await.is_err());
 
     drop(vfs);
+    IdbStore::delete(&format!("pagedb-idb-vfs:{root}"))
+        .await
+        .unwrap();
+}
+
+#[wasm_bindgen_test]
+async fn idb_vfs_aborted_file_sync_preserves_the_last_committed_image() {
+    let root = format!("abort-file-{}", js_sys::Date::now());
+    {
+        let vfs = IdbVfs::with_root(&root).await.unwrap();
+        let mut file = vfs.open("value", OpenMode::CreateNew).await.unwrap();
+        file.write_at(0, b"old").await.unwrap();
+        file.sync().await.unwrap();
+        vfs.sync_dir("/").await.unwrap();
+
+        file.write_at(0, b"new").await.unwrap();
+        abort_next_idb_put();
+        assert!(matches!(file.sync().await, Err(PagedbError::Io(_))));
+    }
+
+    let reopened = IdbVfs::with_root(&root).await.unwrap();
+    let reader = reopened.open("value", OpenMode::Read).await.unwrap();
+    let mut bytes = [0; 3];
+    assert_eq!(reader.read_at(0, &mut bytes).await.unwrap(), 3);
+    assert_eq!(&bytes, b"old");
+
+    drop(reader);
+    drop(reopened);
+    IdbStore::delete(&format!("pagedb-idb-vfs:{root}"))
+        .await
+        .unwrap();
+}
+
+#[wasm_bindgen_test]
+async fn idb_vfs_aborted_namespace_sync_keeps_new_paths_unpublished() {
+    let root = format!("abort-namespace-{}", js_sys::Date::now());
+    {
+        let vfs = IdbVfs::with_root(&root).await.unwrap();
+        let mut file = vfs.open("unpublished", OpenMode::CreateNew).await.unwrap();
+        file.write_at(0, b"value").await.unwrap();
+        file.sync().await.unwrap();
+
+        abort_next_idb_put();
+        assert!(matches!(vfs.sync_dir("/").await, Err(PagedbError::Io(_))));
+    }
+
+    let reopened = IdbVfs::with_root(&root).await.unwrap();
+    assert!(reopened.open("unpublished", OpenMode::Read).await.is_err());
+
+    drop(reopened);
     IdbStore::delete(&format!("pagedb-idb-vfs:{root}"))
         .await
         .unwrap();
