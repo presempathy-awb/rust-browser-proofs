@@ -1,0 +1,17 @@
+{
+  "name": "silopal-pagedb-opfs",
+  "image": "mcr.microsoft.com/devcontainers/base:bookworm",
+  "workspaceFolder": "/workspaces/silopal-pagedb-opfs",
+  "postCreateCommand": "mkdir -p ~/.local/bin && curl -fsSL https://mise.run | sh && ~/.local/bin/mise trust .mise.toml && ~/.local/bin/mise install",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "rust-lang.rust-analyzer",
+        "golang.go",
+        "tamasfe.even-better-toml",
+        "redhat.vscode-yaml"
+      ]
+    }
+  }
+}
