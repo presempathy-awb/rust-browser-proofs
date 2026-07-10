@@ -20,12 +20,12 @@ exist) in headless Chromium and Firefox.
 | `manifest` | 13 | The A/B-slot crash protocol: torn slots, both-corrupt refusal (no data loss), crash-after-slot-write adoption, orphan GC, ID-reuse guard, namespace invariants |
 | `registry` | 8 | One sync handle per physical file: dedupe, synchronous close, lock semantics, quota and JS-range error typing |
 | `oracle` | 10 | **Real worker termination** at seven commit-phase cuts — a sacrificial worker runs a doomed commit through a parking fault-injection VFS, the test kills it mid-operation and asserts publication-grouped recovery (old-exactly / atomic-either-way / new-exactly) |
-| `receipt` | 2 | Native ↔ browser behavior parity: a fixed op-script's BLAKE3 receipt is byte-identical between MemVfs (native) and OpfsVfs (browser), live and across reopen |
+| `receipt` | 2 | Native ↔ browser behavior parity: a fixed op-script's BLAKE3 receipt matches MemVfs and OpfsVfs for every legal page size, live and across reopen |
 | `idb_spike` | 2 | Dedicated-worker IndexedDB binary transaction viability and explicit-abort atomicity gates for a future fallback adapter; they are not an `IdbVfs` or a production fallback |
 | `idb_store` | 1 | Opt-in local PageDB `idb` feature proof: atomically persists one file image and namespace checkpoint in Firefox; it is not an `IdbVfs` or resolver fallback |
 | `idb_vfs` | 15 | Opt-in local PageDB `IdbVfs` workflows: all memory/Tokio reference VFS semantics, sync and reopen visibility, browser-real request errors and transaction aborts, injected `QuotaExceededError` → `NoSpace` mapping at file and namespace sync, post-commit orphan cleanup and retry, plus local and browser-wide locks in Firefox and Chromium; it is not a selectable fallback |
 | `idb_crash` | 4 | Real browser worker termination before, during, and after `IdbVfs` namespace publication plus after a PageDB header write before its persistence sync: unpublished paths stay hidden and reclaimable, published paths reopen, and the pre-header-sync database recovers exactly the prior commit in Firefox and Chromium |
-| `idb_receipt` | 1 | Opt-in local PageDB `IdbVfs` engine receipt parity across a full Firefox and Chromium reopen; it is not a selectable fallback |
+| `idb_receipt` | 1 | Opt-in local PageDB `IdbVfs` engine receipt parity for every legal page size across a full Firefox and Chromium reopen; it is not a selectable fallback |
 | `idb_cross_worker` | 1 | Firefox and Chromium cross-worker writer-lock contention and post-termination release for `IdbVfs`; it is not a selectable fallback |
 | `idb_cross_tab` | 1 | Firefox and Chromium same-origin opener/popup proof of the exact `IdbVfs` Web Locks name and fail-fast protocol: a second tab contends, then acquires after the popup closes; `IdbVfs` itself remains worker-only |
 

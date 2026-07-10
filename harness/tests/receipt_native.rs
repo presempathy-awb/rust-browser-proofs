@@ -8,20 +8,22 @@
 
 use pagedb::vfs::memory::MemVfs;
 use pagedb::{Db, RealmId};
-use pagedb_opfs_harness::receipt::{self, EXPECTED_RECEIPT, KEK, PAGE};
+use pagedb_opfs_harness::receipt::{self, KEK, RECEIPT_MATRIX};
 
 const REALM: RealmId = receipt::REALM;
 
 #[tokio::test(flavor = "current_thread")]
-async fn native_receipt_matches_pinned_constant() {
-    let db = Db::open_internal(MemVfs::new(), KEK, PAGE, REALM)
-        .await
-        .unwrap();
-    receipt::run_script(&db).await;
-    let got = receipt::compute_receipt(&db).await;
-    assert_eq!(
-        got, EXPECTED_RECEIPT,
-        "native receipt drifted - if the op-script changed intentionally, \
-         re-pin EXPECTED_RECEIPT in harness/src/receipt.rs"
-    );
+async fn native_receipt_matches_pinned_constant_for_all_legal_page_sizes() {
+    for (page, expected) in RECEIPT_MATRIX {
+        let db = Db::open_internal(MemVfs::new(), KEK, page, REALM)
+            .await
+            .unwrap();
+        receipt::run_script(&db).await;
+        let got = receipt::compute_receipt(&db).await;
+        assert_eq!(
+            got, expected,
+            "native receipt drifted for page size {page} - if the op-script changed intentionally, \
+             re-pin RECEIPT_MATRIX in harness/src/receipt.rs"
+        );
+    }
 }

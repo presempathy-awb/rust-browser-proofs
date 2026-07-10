@@ -9,11 +9,32 @@
 use pagedb::vfs::traits::Vfs;
 use pagedb::{Db, RealmId, SegmentKind, SegmentPageKind};
 
-/// Pinned by tests/receipt_native.rs; asserted equal by the browser test.
-pub const EXPECTED_RECEIPT: &str =
-    "42649b2924cfa2c47d7dee7340f179e5718517660f50e9c40fdab46680cf7676";
-
-pub const PAGE: usize = 4096;
+/// Native reference receipts for every format-legal page size.
+///
+/// The receipt includes the sealed segment page count, so each format has a
+/// distinct expected hash. Browser tests compare against this native matrix.
+pub const RECEIPT_MATRIX: [(usize, &str); 5] = [
+    (
+        4096,
+        "42649b2924cfa2c47d7dee7340f179e5718517660f50e9c40fdab46680cf7676",
+    ),
+    (
+        8192,
+        "aa72ecaf100edfbe183e2fb385801321658fd6e11b3e155fbd040ac4bdc8aff5",
+    ),
+    (
+        16384,
+        "5fe193170a154b40d4ed6a092e88f8145aec8aecd3b8b6e19b832baa7731108d",
+    ),
+    (
+        32768,
+        "8ee44b13e6e355b51e21abafb9a292c5dc1d5628ee0a2c29ae91bb07f6ff72d8",
+    ),
+    (
+        65536,
+        "25012effc8e0c757a5bf40ada4f5a06ac68a9d52a3fe4656cf36e3e6aee2cc54",
+    ),
+];
 pub const KEK: [u8; 32] = [7u8; 32];
 pub const REALM: RealmId = RealmId::new([3u8; 16]);
 
