@@ -356,7 +356,10 @@ async fn gc_never_touches_unrecognized_entries() {
         m.commit().unwrap();
     }
 
-    let f = reg.open(&dir, "user-notes.txt", false, false).await.unwrap();
+    let f = reg
+        .open(&dir, "user-notes.txt", false, false)
+        .await
+        .unwrap();
     let mut buf = [0u8; 8];
     assert_eq!(f.read_at(0, &mut buf).unwrap(), 8);
     assert_eq!(&buf, b"not ours");

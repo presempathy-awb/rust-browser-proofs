@@ -13,12 +13,18 @@ exist) in headless Chromium and Firefox.
 
 | Suite | Cases | Proves |
 |---|---|---|
+| `smoke` | 1 | Dedicated-worker raw `FileSystemSyncAccessHandle` write/read/flush/close/remove round trip; proves the browser test vehicle before pagedb participates |
+| `vfs_basic` | 2 | First end-to-end `OpfsVfs` trait and `Db` commit/reopen proofs, including read-only write rejection |
 | `conformance` | 18 | 1:1 ports of pagedb's `vfs_memory` reference semantics on real OPFS, incl. rename-while-open and the vectored zero-fill contract |
 | `engine` | 8 | `Db<OpfsVfs>` end-to-end: multi-commit KV + ordered scans, full segment lifecycle across reopen, crash-shaped reconcile promotion, tombstone GC, all five page sizes, spill scratch stress |
-| `manifest` | 12 | The A/B-slot crash protocol: torn slots, both-corrupt refusal (no data loss), crash-after-slot-write adoption, orphan GC, ID-reuse guard, namespace invariants |
+| `manifest` | 13 | The A/B-slot crash protocol: torn slots, both-corrupt refusal (no data loss), crash-after-slot-write adoption, orphan GC, ID-reuse guard, namespace invariants |
 | `registry` | 8 | One sync handle per physical file: dedupe, synchronous close, lock semantics, quota and JS-range error typing |
 | `oracle` | 10 | **Real worker termination** at seven commit-phase cuts — a sacrificial worker runs a doomed commit through a parking fault-injection VFS, the test kills it mid-operation and asserts publication-grouped recovery (old-exactly / atomic-either-way / new-exactly) |
 | `receipt` | 2 | Native ↔ browser behavior parity: a fixed op-script's BLAKE3 receipt is byte-identical between MemVfs (native) and OpfsVfs (browser), live and across reopen |
+| `idb_spike` | 2 | Dedicated-worker IndexedDB binary transaction viability and explicit-abort atomicity gates for a future fallback adapter; they are not an `IdbVfs` or a production fallback |
+| `idb_store` | 1 | Opt-in local PageDB `idb` feature proof: atomically persists one file image and namespace checkpoint in Firefox; it is not an `IdbVfs` or resolver fallback |
+| `idb_vfs` | 3 | Opt-in local PageDB `IdbVfs` workflows: sync, rename while open, metadata visibility, reopen, vectored read, modes, remove, and locks in Firefox; it is not a selectable fallback |
+| `idb_receipt` | 1 | Opt-in local PageDB `IdbVfs` engine receipt parity across a full Firefox reopen; it is not a selectable fallback |
 
 The upstream PR description lives at
 [`docs/pr/2026-07-opfs-sync-backend.md`](docs/pr/2026-07-opfs-sync-backend.md);
@@ -31,15 +37,27 @@ Requires [mise](https://mise.jdx.dev), Chrome or Chromium (plus a matching
 
 ```sh
 just setup          # toolchain, wasm target, hooks
+just check-chrome-driver # fast local ChromeDriver preflight
 just test-chrome    # all suites, headless Chromium
-just test-firefox   # all suites, headless Firefox
+just test-firefox   # default suites, headless Firefox
+just test-idb-firefox # local-only IDB spike, store, VFS, and receipt proof
 just test-native    # native-side tests (codec, receipt reference)
 ```
+
+`test-chrome` runs the ChromeDriver preflight first, so an OS-level driver
+startup failure is reported before the wasm harness is built. The check only
+starts a local WebDriver listener and does not modify browser or driver trust
+settings.
 
 > **Dependency note:** `harness/Cargo.toml` pins pagedb to the
 > `feat/opfs-sync-backend` branch on the author's private remote. Until that
 > branch lands upstream, point the `pagedb` git dependency (or a
 > `.cargo/config.toml` `[patch]`) at your own checkout of the branch.
+
+> **Local IDB spike:** `idb_store`, `idb_vfs`, and `idb_receipt` require the
+> local-only `codex/idb-vfs-fallback` PageDB branch and are deliberately
+> excluded from CI; run `just test-idb-firefox`. None makes fallback selection
+> available.
 
 ## How the crash oracle works
 

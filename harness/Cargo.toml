@@ -13,6 +13,11 @@ publish = false
 [lib]
 crate-type = ["cdylib", "rlib"]
 
+[features]
+# Local-only browser spike for the unmerged PageDB `idb` feature. CI continues
+# to build the committed upstream branch without this opt-in feature.
+idb-vendor-spike = ["pagedb/idb"]
+
 [dependencies]
 pagedb = { git = "ssh://git@git.telpher.stream:2222/awb/pagedb.git", branch = "feat/opfs-sync-backend", features = ["opfs"] }
 blake3 = "1"
@@ -42,6 +47,14 @@ web-sys = { version = "0.3", features = [
     "WorkerLocation",
     "Blob",
     "Url",
+    "Event",
+    "IdbDatabase",
+    "IdbFactory",
+    "IdbObjectStore",
+    "IdbOpenDbRequest",
+    "IdbRequest",
+    "IdbTransaction",
+    "IdbTransactionMode",
 ] }
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
