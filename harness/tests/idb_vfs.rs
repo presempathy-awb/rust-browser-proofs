@@ -29,10 +29,19 @@ export function abort_next_idb_delete() {
     return request;
   };
 }
+
+export function fail_next_idb_put_with_duplicate_add() {
+  const original = IDBObjectStore.prototype.put;
+  IDBObjectStore.prototype.put = function (...args) {
+    IDBObjectStore.prototype.put = original;
+    return this.add(...args);
+  };
+}
 "#)]
 extern "C" {
     fn abort_next_idb_put();
     fn abort_next_idb_delete();
+    fn fail_next_idb_put_with_duplicate_add();
 }
 
 #[wasm_bindgen_test]
@@ -324,6 +333,61 @@ async fn idb_vfs_aborted_namespace_sync_keeps_new_paths_unpublished() {
 
     let reopened = IdbVfs::with_root(&root).await.unwrap();
     assert!(reopened.open("unpublished", OpenMode::Read).await.is_err());
+
+    drop(reopened);
+    IdbStore::delete(&format!("pagedb-idb-vfs:{root}"))
+        .await
+        .unwrap();
+}
+
+#[wasm_bindgen_test]
+async fn idb_vfs_duplicate_request_error_preserves_the_last_file_image() {
+    let root = format!("request-file-{}", js_sys::Date::now());
+    {
+        let vfs = IdbVfs::with_root(&root).await.unwrap();
+        let mut file = vfs.open("value", OpenMode::CreateNew).await.unwrap();
+        file.write_at(0, b"old").await.unwrap();
+        file.sync().await.unwrap();
+        vfs.sync_dir("/").await.unwrap();
+
+        file.write_at(0, b"new").await.unwrap();
+        fail_next_idb_put_with_duplicate_add();
+        assert!(matches!(file.sync().await, Err(PagedbError::Io(_))));
+    }
+
+    let reopened = IdbVfs::with_root(&root).await.unwrap();
+    let reader = reopened.open("value", OpenMode::Read).await.unwrap();
+    let mut bytes = [0; 3];
+    assert_eq!(reader.read_at(0, &mut bytes).await.unwrap(), 3);
+    assert_eq!(&bytes, b"old");
+
+    drop(reader);
+    drop(reopened);
+    IdbStore::delete(&format!("pagedb-idb-vfs:{root}"))
+        .await
+        .unwrap();
+}
+
+#[wasm_bindgen_test]
+async fn idb_vfs_duplicate_request_error_keeps_new_paths_unpublished() {
+    let root = format!("request-namespace-{}", js_sys::Date::now());
+    {
+        let vfs = IdbVfs::with_root(&root).await.unwrap();
+        let mut durable = vfs.open("durable", OpenMode::CreateNew).await.unwrap();
+        durable.write_at(0, b"d").await.unwrap();
+        durable.sync().await.unwrap();
+        vfs.sync_dir("/").await.unwrap();
+
+        let mut unpublished = vfs.open("unpublished", OpenMode::CreateNew).await.unwrap();
+        unpublished.write_at(0, b"u").await.unwrap();
+        unpublished.sync().await.unwrap();
+        fail_next_idb_put_with_duplicate_add();
+        assert!(matches!(vfs.sync_dir("/").await, Err(PagedbError::Io(_))));
+    }
+
+    let reopened = IdbVfs::with_root(&root).await.unwrap();
+    assert!(reopened.open("unpublished", OpenMode::Read).await.is_err());
+    assert!(reopened.open("durable", OpenMode::Read).await.is_ok());
 
     drop(reopened);
     IdbStore::delete(&format!("pagedb-idb-vfs:{root}"))
