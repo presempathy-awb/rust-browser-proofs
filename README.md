@@ -14,7 +14,7 @@ exist) in headless Chromium and Firefox.
 | Suite | Cases | Proves |
 |---|---|---|
 | `smoke` | 1 | Dedicated-worker raw `FileSystemSyncAccessHandle` write/read/flush/close/remove round trip; proves the browser test vehicle before pagedb participates |
-| `bootstrap` | 1 | Shipped capability-preflight module dynamically imports in the browser, creates a dedicated worker, and exercises a real OPFS sync access handle without requesting persistence |
+| `bootstrap` | 2 | Shipped capability-preflight module dynamically imports in the browser, creates a dedicated worker, exercises a real OPFS sync access handle without requesting persistence, and rejects accidental non-boolean persistence requests |
 | `vfs_basic` | 2 | First end-to-end `OpfsVfs` trait and `Db` commit/reopen proofs, including read-only write rejection |
 | `conformance` | 18 | 1:1 ports of pagedb's `vfs_memory` reference semantics on real OPFS, incl. rename-while-open and the vectored zero-fill contract |
 | `engine` | 8 | `Db<OpfsVfs>` end-to-end: multi-commit KV + ordered scans, full segment lifecycle across reopen, crash-shaped reconcile promotion, tombstone GC, all five page sizes, spill scratch stress |
