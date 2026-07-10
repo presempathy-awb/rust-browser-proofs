@@ -5,6 +5,7 @@
 use std::{cell::RefCell, rc::Rc};
 
 use pagedb::vfs::{IdbStore, IdbVfs, OpenMode, Vfs, VfsFile};
+use pagedb::{Db, RealmId};
 use wasm_bindgen::JsCast;
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen_futures::JsFuture;
@@ -28,6 +29,9 @@ self.onmessage = async (event) => {
 
 const DRIVER_GLUE: &str = include_str!("../pkg-idb-driver/pagedb_opfs_harness.js");
 const DRIVER_WASM: &[u8] = include_bytes!("../pkg-idb-driver/pagedb_opfs_harness_bg.wasm");
+const PAGE: usize = 4096;
+const KEK: [u8; 32] = [5u8; 32];
+const REALM: RealmId = RealmId::new([2u8; 16]);
 
 async fn sleep_ms(ms: i32) {
     let promise = js_sys::Promise::new(&mut |resolve, _| {
@@ -87,6 +91,14 @@ async fn seed_baseline(root: &str) {
     vfs.sync_dir("/").await.unwrap();
 }
 
+async fn seed_database(root: &str) {
+    let vfs = IdbVfs::with_root(root).await.unwrap();
+    let db = Db::open_internal(vfs, KEK, PAGE, REALM).await.unwrap();
+    let mut write = db.begin_write().await.unwrap();
+    write.put(b"baseline", b"committed-gen-1").await.unwrap();
+    write.commit().await.unwrap();
+}
+
 #[wasm_bindgen_test]
 async fn idb_vfs_worker_termination_after_file_sync_keeps_metadata_unpublished() {
     let root = format!("crash-file-sync-{}", js_sys::Date::now());
@@ -135,6 +147,65 @@ async fn idb_vfs_worker_termination_after_namespace_sync_keeps_metadata_publishe
     assert_eq!(&doomed_bytes, b"unpublished");
 
     drop(doomed);
+    drop(baseline);
+    drop(reopened);
+    IdbStore::delete(&database).await.unwrap();
+}
+
+#[wasm_bindgen_test]
+async fn idb_vfs_worker_termination_after_header_write_recovers_the_prior_commit() {
+    let root = format!("crash-header-sync-{}", js_sys::Date::now());
+    let database = format!("pagedb-idb-vfs:{root}");
+    seed_database(&root).await;
+
+    let (worker, messages) = spawn_crash_worker(&root, "idb_crash_after_header_write");
+    let beacon = wait_for_message(&messages).await;
+    assert!(
+        beacon.starts_with("phase-reached:Sync#2"),
+        "unexpected crash beacon: {beacon}"
+    );
+    worker.terminate();
+
+    let vfs = IdbVfs::with_root(&root).await.unwrap();
+    let db = Db::open_existing(vfs.clone(), KEK, PAGE, REALM)
+        .await
+        .unwrap();
+    let read = db.begin_read().await.unwrap();
+    assert_eq!(
+        read.get(b"baseline").await.unwrap().as_deref(),
+        Some(b"committed-gen-1".as_ref())
+    );
+    assert_eq!(read.get(b"victim").await.unwrap(), None);
+    drop(read);
+    drop(db);
+    drop(vfs);
+    IdbStore::delete(&database).await.unwrap();
+}
+
+#[wasm_bindgen_test]
+async fn idb_vfs_worker_termination_inside_namespace_transaction_keeps_path_unpublished() {
+    let root = format!("crash-namespace-put-{}", js_sys::Date::now());
+    let database = format!("pagedb-idb-vfs:{root}");
+    seed_baseline(&root).await;
+
+    let (worker, messages) = spawn_crash_worker(&root, "idb_crash_during_namespace_put");
+    assert_eq!(
+        wait_for_message(&messages).await,
+        "idb-namespace-transaction-active"
+    );
+    worker.terminate();
+
+    let reopened = IdbVfs::with_root(&root).await.unwrap();
+    let baseline = reopened.open("baseline", OpenMode::Read).await.unwrap();
+    let mut bytes = [0; 7];
+    assert_eq!(baseline.read_at(0, &mut bytes).await.unwrap(), 7);
+    assert_eq!(&bytes, b"durable");
+    assert!(reopened.open("doomed", OpenMode::Read).await.is_err());
+    reopened.sync_dir("/").await.unwrap();
+
+    let store = IdbStore::open(&database).await.unwrap();
+    assert_eq!(store.load_file(1).await.unwrap(), None);
+    store.close();
     drop(baseline);
     drop(reopened);
     IdbStore::delete(&database).await.unwrap();
