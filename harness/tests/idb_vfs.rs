@@ -19,9 +19,20 @@ export function abort_next_idb_put() {
     return request;
   };
 }
+
+export function abort_next_idb_delete() {
+  const original = IDBObjectStore.prototype.delete;
+  IDBObjectStore.prototype.delete = function (...args) {
+    IDBObjectStore.prototype.delete = original;
+    const request = original.apply(this, args);
+    this.transaction.abort();
+    return request;
+  };
+}
 "#)]
 extern "C" {
     fn abort_next_idb_put();
+    fn abort_next_idb_delete();
 }
 
 #[wasm_bindgen_test]
@@ -276,6 +287,41 @@ async fn idb_vfs_sync_dir_collects_unreferenced_file_records() {
 
     let store = IdbStore::open(&database).await.unwrap();
     store.store_file(999, b"orphan").await.unwrap();
+    assert_eq!(
+        store.load_file(999).await.unwrap(),
+        Some(b"orphan".to_vec())
+    );
+    store.close();
+
+    vfs.sync_dir("/").await.unwrap();
+
+    let store = IdbStore::open(&database).await.unwrap();
+    assert_eq!(store.load_file(0).await.unwrap(), Some(b"live".to_vec()));
+    assert_eq!(store.load_file(999).await.unwrap(), None);
+    store.close();
+    drop(live);
+    drop(vfs);
+    IdbStore::delete(&database).await.unwrap();
+}
+
+#[wasm_bindgen_test]
+async fn idb_vfs_retries_orphan_cleanup_after_an_aborted_sweep() {
+    let root = format!("orphan-retry-{}", js_sys::Date::now());
+    let database = format!("pagedb-idb-vfs:{root}");
+    let vfs = IdbVfs::with_root(&root).await.unwrap();
+    let mut live = vfs.open("live", OpenMode::CreateNew).await.unwrap();
+    live.write_at(0, b"live").await.unwrap();
+    live.sync().await.unwrap();
+    vfs.sync_dir("/").await.unwrap();
+
+    let store = IdbStore::open(&database).await.unwrap();
+    store.store_file(999, b"orphan").await.unwrap();
+    store.close();
+
+    abort_next_idb_delete();
+    vfs.sync_dir("/").await.unwrap();
+
+    let store = IdbStore::open(&database).await.unwrap();
     assert_eq!(
         store.load_file(999).await.unwrap(),
         Some(b"orphan".to_vec())
