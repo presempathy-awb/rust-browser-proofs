@@ -24,6 +24,7 @@ exist) in headless Chromium and Firefox.
 | `idb_spike` | 2 | Dedicated-worker IndexedDB binary transaction viability and explicit-abort atomicity gates for a future fallback adapter; they are not an `IdbVfs` or a production fallback |
 | `idb_store` | 1 | Opt-in local PageDB `idb` feature proof: atomically persists one file image and namespace checkpoint in Firefox; it is not an `IdbVfs` or resolver fallback |
 | `idb_vfs` | 9 | Opt-in local PageDB `IdbVfs` workflows: sync, rename while open, metadata visibility, reopen, vectored read, modes, remove, direct listing, truncate, real transaction aborts, post-commit orphan cleanup and retry, and locks in Firefox; it is not a selectable fallback |
+| `idb_crash` | 2 | Real Firefox worker termination on both sides of `IdbVfs` namespace publication: before it, the uncommitted path stays hidden and its orphan is reclaimed; after it, the durable baseline and published path reopen |
 | `idb_receipt` | 1 | Opt-in local PageDB `IdbVfs` engine receipt parity across a full Firefox reopen; it is not a selectable fallback |
 | `idb_cross_worker` | 1 | Firefox cross-worker writer-lock contention and post-termination release for `IdbVfs`; it is not a selectable fallback |
 
@@ -41,7 +42,7 @@ just setup          # toolchain, wasm target, hooks
 just check-chrome-driver # fast local ChromeDriver preflight
 just test-chrome    # all suites, headless Chromium
 just test-firefox   # default suites, headless Firefox
-just test-idb-firefox # local-only IDB spike, VFS, receipt, and cross-worker lock proof
+just test-idb-firefox # local-only IDB spike, VFS, file-sync crash, receipt, and cross-worker lock proof
 just test-native    # native-side tests (codec, receipt reference)
 ```
 

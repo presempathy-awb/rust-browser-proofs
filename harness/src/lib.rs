@@ -13,3 +13,6 @@ pub mod fault;
 
 #[cfg(target_arch = "wasm32")]
 pub mod driver;
+
+#[cfg(all(target_arch = "wasm32", feature = "idb-crash-driver"))]
+pub mod idb_driver;

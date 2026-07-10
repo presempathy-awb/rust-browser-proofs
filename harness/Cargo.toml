@@ -17,6 +17,8 @@ crate-type = ["cdylib", "rlib"]
 # Local-only browser spike for the unmerged PageDB `idb` feature. CI continues
 # to build the committed upstream branch without this opt-in feature.
 idb-vendor-spike = ["pagedb/idb"]
+# Builds the self-contained, sacrificial worker used only by `idb_crash`.
+idb-crash-driver = ["pagedb/idb-crash-driver"]
 
 [dependencies]
 pagedb = { git = "ssh://git@git.telpher.stream:2222/awb/pagedb.git", branch = "feat/opfs-sync-backend", features = ["opfs"] }

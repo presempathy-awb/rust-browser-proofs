@@ -23,6 +23,12 @@ setup:
 build-driver:
     cd harness && wasm-pack build --dev --target no-modules --no-typescript --out-dir pkg-driver
 
+# Self-contained IDB worker for the file-sync termination oracle. The normal
+# `idb` feature remains module-based so production Web Locks keep their exact
+# browser integration; this driver never calls the lock surface.
+build-idb-driver:
+    cd harness && mise exec -- sh -c 'toolchain="$(dirname "$(rustup which rustc)")"; export PATH="$toolchain:$PATH" RUSTC="$toolchain/rustc" CARGO="$toolchain/cargo"; wasm-pack build --dev --target no-modules --no-typescript --out-dir pkg-idb-driver --features idb-crash-driver'
+
 check-chrome-driver:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -71,8 +77,8 @@ test-firefox: build-driver
 
 # Local-only PageDB IDB fallback proof. Requires the gitignored Cargo patch
 # to the `codex/idb-vfs-fallback` vendor branch; it is intentionally not CI.
-test-idb-firefox:
-    cd harness && mise exec -- sh -c 'toolchain="$(dirname "$(rustup which rustc)")"; export PATH="$toolchain:$PATH" RUSTC="$toolchain/rustc" CARGO="$toolchain/cargo" WASM_BINDGEN_TEST_TIMEOUT=120; wasm-pack test --headless --firefox --test idb_spike && wasm-pack test --headless --firefox --test idb_store --features idb-vendor-spike && wasm-pack test --headless --firefox --test idb_vfs --features idb-vendor-spike && wasm-pack test --headless --firefox --test idb_receipt --features idb-vendor-spike && wasm-pack test --headless --firefox --test idb_cross_worker --features idb-vendor-spike'
+test-idb-firefox: build-idb-driver
+    cd harness && mise exec -- sh -c 'toolchain="$(dirname "$(rustup which rustc)")"; export PATH="$toolchain:$PATH" RUSTC="$toolchain/rustc" CARGO="$toolchain/cargo" WASM_BINDGEN_TEST_TIMEOUT=120; wasm-pack test --headless --firefox --test idb_spike && wasm-pack test --headless --firefox --test idb_store --features idb-vendor-spike && wasm-pack test --headless --firefox --test idb_vfs --features idb-vendor-spike && wasm-pack test --headless --firefox --test idb_crash --features idb-vendor-spike && wasm-pack test --headless --firefox --test idb_receipt --features idb-vendor-spike && wasm-pack test --headless --firefox --test idb_cross_worker --features idb-vendor-spike'
 
 test-browsers: test-chrome test-firefox
 

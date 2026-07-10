@@ -17,3 +17,4 @@ node_modules/
 # two sources. Regenerate freely; the harness is not a published artifact.
 Cargo.lock
 harness/pkg-driver/
+harness/pkg-idb-driver/
