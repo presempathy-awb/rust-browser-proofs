@@ -23,7 +23,7 @@ exist) in headless Chromium and Firefox.
 | `receipt` | 2 | Native ↔ browser behavior parity: a fixed op-script's BLAKE3 receipt is byte-identical between MemVfs (native) and OpfsVfs (browser), live and across reopen |
 | `idb_spike` | 2 | Dedicated-worker IndexedDB binary transaction viability and explicit-abort atomicity gates for a future fallback adapter; they are not an `IdbVfs` or a production fallback |
 | `idb_store` | 1 | Opt-in local PageDB `idb` feature proof: atomically persists one file image and namespace checkpoint in Firefox; it is not an `IdbVfs` or resolver fallback |
-| `idb_vfs` | 9 | Opt-in local PageDB `IdbVfs` workflows: sync, rename while open, metadata visibility, reopen, vectored read, modes, remove, direct listing, truncate, real transaction aborts, post-commit orphan cleanup and retry, and locks in Firefox; it is not a selectable fallback |
+| `idb_vfs` | 11 | Opt-in local PageDB `IdbVfs` workflows: all memory/Tokio reference VFS semantics, sync and reopen visibility, real transaction aborts, post-commit orphan cleanup and retry, plus local and browser-wide locks in Firefox; it is not a selectable fallback |
 | `idb_crash` | 4 | Real Firefox worker termination before, during, and after `IdbVfs` namespace publication plus after a PageDB header write before its persistence sync: unpublished paths stay hidden and reclaimable, published paths reopen, and the pre-header-sync database recovers exactly the prior commit |
 | `idb_receipt` | 1 | Opt-in local PageDB `IdbVfs` engine receipt parity across a full Firefox reopen; it is not a selectable fallback |
 | `idb_cross_worker` | 1 | Firefox cross-worker writer-lock contention and post-termination release for `IdbVfs`; it is not a selectable fallback |

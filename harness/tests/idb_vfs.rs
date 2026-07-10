@@ -226,6 +226,62 @@ async fn idb_vfs_lists_direct_files_and_removes_idempotently() {
 }
 
 #[wasm_bindgen_test]
+async fn idb_vfs_matches_reference_lock_matrix() {
+    let root = format!("lock-matrix-{}", js_sys::Date::now());
+    let database = format!("pagedb-idb-vfs:{root}");
+    let vfs = IdbVfs::with_root(&root).await.unwrap();
+
+    let shared_first = vfs.lock_shared("shared").await.unwrap();
+    let shared_second = vfs.lock_shared("shared").await.unwrap();
+    assert!(matches!(
+        vfs.lock_exclusive("shared").await,
+        Err(PagedbError::AlreadyLocked)
+    ));
+    drop(shared_second);
+    drop(shared_first);
+
+    let exclusive = vfs.lock_exclusive("exclusive").await.unwrap();
+    assert!(matches!(
+        vfs.lock_shared("exclusive").await,
+        Err(PagedbError::AlreadyLocked)
+    ));
+    let independent = vfs.lock_exclusive("independent").await.unwrap();
+    drop(exclusive);
+    let reacquired = vfs.lock_exclusive("exclusive").await.unwrap();
+
+    drop(reacquired);
+    drop(independent);
+    drop(vfs);
+    IdbStore::delete(&database).await.unwrap();
+}
+
+#[wasm_bindgen_test]
+async fn idb_vfs_matches_reference_create_or_open_and_absent_read_write_semantics() {
+    let root = format!("open-modes-{}", js_sys::Date::now());
+    let database = format!("pagedb-idb-vfs:{root}");
+    let vfs = IdbVfs::with_root(&root).await.unwrap();
+
+    let error = match vfs.open("missing", OpenMode::ReadWrite).await {
+        Ok(_) => panic!("ReadWrite unexpectedly created an absent file"),
+        Err(error) => error,
+    };
+    assert!(matches!(
+        error,
+        PagedbError::Io(ref io_error) if io_error.kind() == std::io::ErrorKind::NotFound
+    ));
+
+    let mut first = vfs.open("value", OpenMode::CreateOrOpen).await.unwrap();
+    first.write_at(0, b"keep me").await.unwrap();
+    drop(first);
+    let second = vfs.open("value", OpenMode::CreateOrOpen).await.unwrap();
+    assert_eq!(second.len().await.unwrap(), 7);
+
+    drop(second);
+    drop(vfs);
+    IdbStore::delete(&database).await.unwrap();
+}
+
+#[wasm_bindgen_test]
 async fn idb_vfs_aborted_file_sync_preserves_the_last_committed_image() {
     let root = format!("abort-file-{}", js_sys::Date::now());
     {
