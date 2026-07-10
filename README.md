@@ -2,7 +2,8 @@
 
 Browser test harness and crash oracle for [pagedb](https://github.com/NodeDB-Lab/pagedb)'s
 OPFS backend — the in-worker synchronous `FileSystemSyncAccessHandle`
-implementation developed on the `feat/opfs-sync-backend` branch.
+implementation whose original `feat/opfs-sync-backend` history is merged on
+the author's Gitea `main` branch.
 
 pagedb is an encrypted, portable, embedded page store in pure Rust. This
 repo proves its OPFS backend against real browsers: every suite runs inside
@@ -75,10 +76,11 @@ startup failure is reported before the wasm harness is built. The check only
 starts a local WebDriver listener and does not modify browser or driver trust
 settings.
 
-> **Dependency note:** `harness/Cargo.toml` pins pagedb to the
-> `feat/opfs-sync-backend` branch on the author's private remote. Until that
-> branch lands upstream, point the `pagedb` git dependency (or a
-> `.cargo/config.toml` `[patch]`) at your own checkout of the branch.
+> **Dependency note:** `harness/Cargo.toml` pins pagedb to the author's
+> private Gitea `main` branch, which contains the original OPFS feature
+> history. Use a `.cargo/config.toml` `[patch]` only when deliberately testing
+> unmerged local PageDB work; ordinary clean checkouts resolve the declared
+> Gitea dependency directly.
 
 > **Local IDB spike:** `idb_store`, `idb_vfs`, `idb_receipt`, and
 > `idb_cross_worker` and `idb_cross_tab` require the local-only `codex/idb-vfs-fallback` PageDB
