@@ -5,7 +5,7 @@
 # test-browsers` - the runner has no Chrome/Firefox.
 #
 # The pagedb dependency is a PRIVATE git dep on this Gitea instance, so the
-# runner needs the GITEA_DEPLOY_KEY secret: a read-only deploy key for
+# runner needs the PAGEDB_DEPLOY_KEY secret: a read-only deploy key for
 # awb/pagedb (Settings -> Deploy keys). Without it the build fails at fetch.
 name: pagedb-opfs smoke
 
@@ -19,13 +19,27 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+      - name: Validate PageDB dependency credential
+        env:
+          PAGEDB_DEPLOY_KEY: ${{ secrets.PAGEDB_DEPLOY_KEY }}
+        run: |
+          set -eu
+          if [ -z "$PAGEDB_DEPLOY_KEY" ]; then
+            echo "::error::PAGEDB_DEPLOY_KEY is required to fetch private awb/pagedb. Add a read-only deploy key as this repository's Actions secret."
+            exit 1
+          fi
       - name: SSH for private pagedb dep
+        env:
+          PAGEDB_DEPLOY_KEY: ${{ secrets.PAGEDB_DEPLOY_KEY }}
         run: |
           set -eu
           mkdir -p ~/.ssh
-          printf '%s\n' "${{ secrets.GITEA_DEPLOY_KEY }}" > ~/.ssh/id_ed25519
+          printf '%s\n' "$PAGEDB_DEPLOY_KEY" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
-          ssh-keyscan -p 2222 git.telpher.stream >> ~/.ssh/known_hosts 2>/dev/null
+          if ! ssh-keyscan -p 2222 git.telpher.stream >> ~/.ssh/known_hosts 2>/dev/null; then
+            echo "::error::Unable to reach git.telpher.stream:2222 from this Actions runner."
+            exit 1
+          fi
       - name: Install Rust 1.95 + wasm target
         run: |
           set -eu

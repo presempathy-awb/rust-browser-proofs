@@ -51,6 +51,14 @@ just test-idb-firefox # local-only IDB spike, VFS, file-sync crash, receipt, and
 just test-native    # native-side tests (codec, receipt reference)
 ```
 
+## Gitea Actions prerequisite
+
+The `pagedb-opfs smoke` workflow fetches PageDB from a separate private Gitea
+repository. Before it can run, add a read-only `PAGEDB_DEPLOY_KEY` repository
+Actions secret whose public half is authorized as a deploy key on `awb/pagedb`.
+The workflow validates this prerequisite before attempting Rust setup or a git
+fetch; the key is not required for normal local development.
+
 ## Browser capability preflight
 
 [`harness/js/pagedb-opfs-bootstrap.mjs`](harness/js/pagedb-opfs-bootstrap.mjs)
