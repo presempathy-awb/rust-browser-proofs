@@ -5,6 +5,11 @@ const README: &str = include_str!("../../README.md");
 const SUITES: &[(&str, &str, usize)] = &[
     ("smoke", include_str!("smoke.rs"), 1),
     ("bootstrap", include_str!("bootstrap.rs"), 2),
+    (
+        "raw_sync_benchmark",
+        include_str!("raw_sync_benchmark.rs"),
+        2,
+    ),
     ("vfs_basic", include_str!("vfs_basic.rs"), 2),
     ("conformance", include_str!("conformance.rs"), 18),
     ("engine", include_str!("engine.rs"), 8),

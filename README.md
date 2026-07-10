@@ -16,6 +16,7 @@ exist) in headless Chromium and Firefox.
 |---|---|---|
 | `smoke` | 1 | Dedicated-worker raw `FileSystemSyncAccessHandle` write/read/flush/close/remove round trip; proves the browser test vehicle before pagedb participates |
 | `bootstrap` | 2 | Shipped capability-preflight module dynamically imports in the browser, creates a dedicated worker, exercises a real OPFS sync access handle without requesting persistence, and rejects accidental non-boolean persistence requests |
+| `raw_sync_benchmark` | 2 | Raw dedicated-worker OPFS baseline reports repeated 4 KiB sync-handle write+flush and read work, and rejects invalid workload dimensions; it does not claim PageDB VFS or commit performance |
 | `vfs_basic` | 2 | First end-to-end `OpfsVfs` trait and `Db` commit/reopen proofs, including read-only write rejection |
 | `conformance` | 18 | 1:1 ports of pagedb's `vfs_memory` reference semantics on real OPFS, incl. rename-while-open and the vectored zero-fill contract |
 | `engine` | 8 | `Db<OpfsVfs>` end-to-end: multi-commit KV + ordered scans, full segment lifecycle across reopen, crash-shaped reconcile promotion, tombstone GC, all five page sizes, spill scratch stress |
@@ -70,6 +71,27 @@ dedicated worker to exercise `createSyncAccessHandle()`. It does not construct
 a database, start a PageDB worker runtime, or request persistent storage. Set
 `requestPersistence: true` only when the caller is ready to make that browser
 permission request.
+
+## Raw OPFS baseline benchmark
+
+[`harness/js/pagedb-opfs-benchmark.mjs`](harness/js/pagedb-opfs-benchmark.mjs)
+measures repeated raw `FileSystemSyncAccessHandle` writes (each followed by
+`flush()`) and reads inside one dedicated worker:
+
+```js
+import { benchmarkRawSyncAccessHandle } from "./harness/js/pagedb-opfs-benchmark.mjs";
+
+const result = await benchmarkRawSyncAccessHandle({
+  byteLength: 4096,
+  iterations: 3,
+});
+console.log(result);
+```
+
+`byteLength` and `iterations` are caller-selected positive integers; the
+example is only a small correctness-scale workload. The result reports byte
+counts and elapsed time, but enforces no throughput target. It is a raw OPFS
+baseline—not a measurement of PageDB's VFS or database commit path.
 
 `test-chrome` runs the ChromeDriver preflight first, so an OS-level driver
 startup failure is reported before the wasm harness is built. The check only
