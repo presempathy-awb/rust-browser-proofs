@@ -149,3 +149,50 @@ async fn idb_vfs_sync_dir_is_the_metadata_visibility_boundary() {
         .await
         .unwrap();
 }
+
+#[wasm_bindgen_test]
+async fn idb_vfs_truncate_shrinks_and_zero_extends() {
+    let root = format!("truncate-{}", js_sys::Date::now());
+    let vfs = IdbVfs::with_root(&root).await.unwrap();
+    let mut file = vfs.open("value", OpenMode::CreateNew).await.unwrap();
+    file.write_at(0, &[0xab; 100]).await.unwrap();
+
+    file.truncate(50).await.unwrap();
+    assert_eq!(file.len().await.unwrap(), 50);
+    file.truncate(150).await.unwrap();
+    assert_eq!(file.len().await.unwrap(), 150);
+
+    let mut extension = [0xff; 100];
+    assert_eq!(file.read_at(50, &mut extension).await.unwrap(), 100);
+    assert!(extension.iter().all(|byte| *byte == 0));
+
+    drop(file);
+    drop(vfs);
+    IdbStore::delete(&format!("pagedb-idb-vfs:{root}"))
+        .await
+        .unwrap();
+}
+
+#[wasm_bindgen_test]
+async fn idb_vfs_lists_direct_files_and_removes_idempotently() {
+    let root = format!("list-remove-{}", js_sys::Date::now());
+    let vfs = IdbVfs::with_root(&root).await.unwrap();
+    vfs.mkdir_all("d/sub").await.unwrap();
+    vfs.mkdir_all("d/sub").await.unwrap();
+
+    for path in ["d/a", "d/b", "d/sub/deep"] {
+        vfs.open(path, OpenMode::CreateNew).await.unwrap();
+    }
+    let mut entries = vfs.list_dir("d").await.unwrap();
+    entries.sort();
+    assert_eq!(entries, vec!["a", "b"]);
+
+    vfs.remove("d/a").await.unwrap();
+    vfs.remove("/d/a").await.unwrap();
+    assert!(vfs.open("d/a", OpenMode::Read).await.is_err());
+
+    drop(vfs);
+    IdbStore::delete(&format!("pagedb-idb-vfs:{root}"))
+        .await
+        .unwrap();
+}
