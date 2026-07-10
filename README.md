@@ -25,6 +25,7 @@ exist) in headless Chromium and Firefox.
 | `idb_store` | 1 | Opt-in local PageDB `idb` feature proof: atomically persists one file image and namespace checkpoint in Firefox; it is not an `IdbVfs` or resolver fallback |
 | `idb_vfs` | 3 | Opt-in local PageDB `IdbVfs` workflows: sync, rename while open, metadata visibility, reopen, vectored read, modes, remove, and locks in Firefox; it is not a selectable fallback |
 | `idb_receipt` | 1 | Opt-in local PageDB `IdbVfs` engine receipt parity across a full Firefox reopen; it is not a selectable fallback |
+| `idb_cross_worker` | 1 | Firefox cross-worker writer-lock contention and post-termination release for `IdbVfs`; it is not a selectable fallback |
 
 The upstream PR description lives at
 [`docs/pr/2026-07-opfs-sync-backend.md`](docs/pr/2026-07-opfs-sync-backend.md);
@@ -40,7 +41,7 @@ just setup          # toolchain, wasm target, hooks
 just check-chrome-driver # fast local ChromeDriver preflight
 just test-chrome    # all suites, headless Chromium
 just test-firefox   # default suites, headless Firefox
-just test-idb-firefox # local-only IDB spike, store, VFS, and receipt proof
+just test-idb-firefox # local-only IDB spike, VFS, receipt, and cross-worker lock proof
 just test-native    # native-side tests (codec, receipt reference)
 ```
 
@@ -54,10 +55,10 @@ settings.
 > branch lands upstream, point the `pagedb` git dependency (or a
 > `.cargo/config.toml` `[patch]`) at your own checkout of the branch.
 
-> **Local IDB spike:** `idb_store`, `idb_vfs`, and `idb_receipt` require the
-> local-only `codex/idb-vfs-fallback` PageDB branch and are deliberately
-> excluded from CI; run `just test-idb-firefox`. None makes fallback selection
-> available.
+> **Local IDB spike:** `idb_store`, `idb_vfs`, `idb_receipt`, and
+> `idb_cross_worker` require the local-only `codex/idb-vfs-fallback` PageDB
+> branch and are deliberately excluded from CI; run `just test-idb-firefox`.
+> None makes fallback selection available.
 
 ## How the crash oracle works
 

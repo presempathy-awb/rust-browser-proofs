@@ -72,7 +72,7 @@ test-firefox: build-driver
 # Local-only PageDB IDB fallback proof. Requires the gitignored Cargo patch
 # to the `codex/idb-vfs-fallback` vendor branch; it is intentionally not CI.
 test-idb-firefox:
-    cd harness && mise exec -- sh -c 'toolchain="$(dirname "$(rustup which rustc)")"; export PATH="$toolchain:$PATH" RUSTC="$toolchain/rustc" CARGO="$toolchain/cargo" WASM_BINDGEN_TEST_TIMEOUT=120; wasm-pack test --headless --firefox --test idb_spike && wasm-pack test --headless --firefox --test idb_store --features idb-vendor-spike && wasm-pack test --headless --firefox --test idb_vfs --features idb-vendor-spike && wasm-pack test --headless --firefox --test idb_receipt --features idb-vendor-spike'
+    cd harness && mise exec -- sh -c 'toolchain="$(dirname "$(rustup which rustc)")"; export PATH="$toolchain:$PATH" RUSTC="$toolchain/rustc" CARGO="$toolchain/cargo" WASM_BINDGEN_TEST_TIMEOUT=120; wasm-pack test --headless --firefox --test idb_spike && wasm-pack test --headless --firefox --test idb_store --features idb-vendor-spike && wasm-pack test --headless --firefox --test idb_vfs --features idb-vendor-spike && wasm-pack test --headless --firefox --test idb_receipt --features idb-vendor-spike && wasm-pack test --headless --firefox --test idb_cross_worker --features idb-vendor-spike'
 
 test-browsers: test-chrome test-firefox
 
