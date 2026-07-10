@@ -14,6 +14,7 @@ exist) in headless Chromium and Firefox.
 | Suite | Cases | Proves |
 |---|---|---|
 | `smoke` | 1 | Dedicated-worker raw `FileSystemSyncAccessHandle` write/read/flush/close/remove round trip; proves the browser test vehicle before pagedb participates |
+| `bootstrap` | 1 | Shipped capability-preflight module dynamically imports in the browser, creates a dedicated worker, and exercises a real OPFS sync access handle without requesting persistence |
 | `vfs_basic` | 2 | First end-to-end `OpfsVfs` trait and `Db` commit/reopen proofs, including read-only write rejection |
 | `conformance` | 18 | 1:1 ports of pagedb's `vfs_memory` reference semantics on real OPFS, incl. rename-while-open and the vectored zero-fill contract |
 | `engine` | 8 | `Db<OpfsVfs>` end-to-end: multi-commit KV + ordered scans, full segment lifecycle across reopen, crash-shaped reconcile promotion, tombstone GC, all five page sizes, spill scratch stress |
@@ -47,6 +48,27 @@ just test-idb-chrome # local-only IDB spike, VFS, file-sync crash, receipt, and 
 just test-idb-firefox # local-only IDB spike, VFS, file-sync crash, receipt, and cross-worker/cross-tab lock proof
 just test-native    # native-side tests (codec, receipt reference)
 ```
+
+## Browser capability preflight
+
+[`harness/js/pagedb-opfs-bootstrap.mjs`](harness/js/pagedb-opfs-bootstrap.mjs)
+reports whether the current origin can run PageDB's dedicated-worker OPFS VFS:
+
+```js
+import { probeOpfsCapabilities } from "./harness/js/pagedb-opfs-bootstrap.mjs";
+
+const capability = await probeOpfsCapabilities();
+if (!capability.opfs.available || !capability.syncAccessHandle.available) {
+  // Surface BackendUnavailable; do not select an unrelated fallback.
+}
+```
+
+The default probe reports `navigator.storage.estimate()` and existing
+persistence status, then creates and removes one temporary file inside a
+dedicated worker to exercise `createSyncAccessHandle()`. It does not construct
+a database, start a PageDB worker runtime, or request persistent storage. Set
+`requestPersistence: true` only when the caller is ready to make that browser
+permission request.
 
 `test-chrome` runs the ChromeDriver preflight first, so an OS-level driver
 startup failure is reported before the wasm harness is built. The check only
