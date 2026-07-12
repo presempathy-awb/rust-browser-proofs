@@ -1,4 +1,4 @@
-# pagedb-opfs
+# silopal-pagedb-browser-proofs
 
 Browser test harness and crash oracle for [pagedb](https://github.com/NodeDB-Lab/pagedb)'s
 OPFS backend — the in-worker synchronous `FileSystemSyncAccessHandle`
@@ -9,6 +9,40 @@ pagedb is an encrypted, portable, embedded page store in pure Rust. This
 repo proves its OPFS backend against real browsers: every suite runs inside
 a dedicated Web Worker (the only context where OPFS sync access handles
 exist) in headless Chromium and Firefox.
+
+`silopal-pagedb-opfs` consumes this repository as a pinned Git submodule.
+This suite is independently runnable and owns the test sources, browser
+drivers, mobile runners, and durable-browser acceptance criteria. It is not a
+runtime dependency and does not expose a generic test framework API.
+
+## Browser durability target matrix
+
+A browser is only "durable green" after the full OPFS browser suite passes in
+that browser: conformance, engine, manifest, registry, crash oracle, raw OPFS
+baseline, bootstrap, and receipt parity. The local-only IDB fallback suites are
+separate proof gates and do not make fallback selection available.
+
+| Target | Command | Status boundary |
+|---|---|---|
+| Desktop Chrome/Chromium | `just test-chrome` | Automated durable OPFS suite. Uses the repo-pinned `.tools/chromedriver` after `just check-chrome-driver`. |
+| Desktop Firefox | `just test-firefox` | Automated durable OPFS suite. `wasm-pack` manages GeckoDriver when needed. |
+| Desktop Safari/WebKit | `just test-safari` | Explicit durable OPFS target. Verifies `/usr/bin/safaridriver`, then runs the suite; use `just enable-safari-automation` first if Safari automation is disabled. Do not infer Safari from Chrome or Firefox. |
+| Android Chrome | `ANDROID_SERIAL=<serial> just test-android-chrome` | Device-backed OPFS smoke retry. Runs one bounded suite (`bootstrap` by default), lowers emulator/test priority, and stops the AVD on exit unless `keep_emulator=1`. Use `just test-android-chrome-all` for the full durable matrix. |
+| iPhone Safari | `just test-iphone-safari` | Simulator-backed WebKit target using `safaridriver` iOS capabilities. Boots `IOS_SIMULATOR_ID` or `iPhone 17 Pro`, verifies MobileSafari, and reuses the SafariDriver automation check before running. |
+| iPhone Chrome | `just install-iphone-chrome` / `just run-iphone-chrome` | App-shell target only. Chrome for iOS uses the iOS WebKit engine class, but the Chrome app shell is not proven unless `com.google.chrome` is installed and driven. If missing, set `IPHONE_CHROME_APP_PATH` to a simulator-compatible Chrome app bundle. |
+
+`just test-browsers` intentionally stays Chrome + Firefox because those are the
+fully automated local defaults. Use `just test-browsers-all` when Safari
+automation is enabled. Mobile recipes create a temporary `harness/webdriver.json`
+for the run and remove it on exit; a checked-in `webdriver.json` is treated as a
+configuration conflict.
+
+Android emulator retries are intentionally conservative. Start with
+`just android-status`, then `just test-android-chrome` for the single-suite
+smoke. If the emulator or WebDriver run wedges, `just stop-android-emulator`
+drains only the repo's configured AVD (`ANDROID_AVD`, default
+`pagedb-api35-play`); set `ANDROID_FORCE_KILL=1` only when the AVD refuses to
+exit after the normal `adb emu kill` path.
 
 ## What's here
 
@@ -39,13 +73,30 @@ the PRD and implementation plan are under [`docs/`](docs/).
 ## Running
 
 Requires [mise](https://mise.jdx.dev), Chrome or Chromium (plus a matching
-`chromedriver` in `.tools/` — see the justfile note), and Firefox.
+`chromedriver` in `.tools/` — see the justfile note), and Firefox for the
+default desktop proof. Safari and mobile targets have additional WebDriver or
+device prerequisites listed above.
 
 ```sh
 just setup          # toolchain, wasm target, hooks
+just install-adb    # installs Android platform-tools through Homebrew if adb is missing
+just enable-safari-automation # enables Safari WebDriver automation when macOS admin auth is available
+just install-iphone-safari # boots/verifies the iPhone simulator Safari
+just install-iphone-chrome # installs IPHONE_CHROME_APP_PATH into the booted simulator when Chrome is missing
 just check-chrome-driver # fast local ChromeDriver preflight
+just check-safari-driver # verifies SafariDriver can create an automation session
 just test-chrome    # all suites, headless Chromium
 just test-firefox   # default suites, headless Firefox
+just test-safari    # all suites, Safari/WebKit when remote automation is enabled
+just android-status # cheap Android device/emulator and WebDriver process check
+just test-android-chrome # bounded Android Chrome bootstrap smoke; stops emulator on exit
+just test-android-chrome engine # bounded retry of one named Android Chrome suite
+just test-android-chrome-all # full Android Chrome suite matrix; still stops emulator on exit
+just stop-android-emulator # normal cleanup for the configured Android AVD
+just test-iphone-safari # all suites, booted iPhone simulator Safari
+just run-android-chrome "http://127.0.0.1:8000" # launch Chrome on the selected Android device
+just run-iphone-safari "http://127.0.0.1:8000" # launch MobileSafari in the booted simulator
+just run-iphone-chrome "http://127.0.0.1:8000" # launch Chrome iOS app shell when installed
 just test-idb-chrome # local-only IDB spike, VFS, file-sync crash, receipt, and cross-worker/cross-tab lock proof
 just test-idb-firefox # local-only IDB spike, VFS, file-sync crash, receipt, and cross-worker/cross-tab lock proof
 just test-native    # native-side tests (codec, receipt reference)
