@@ -1,13 +1,10 @@
-# agents.toml - single source of truth for pagedb-opfs AI assistant instructions.
-# pagedb-opfs is a telpher-family repo; this file mirrors the gitspen
-# agents.toml shape but carries this repo's own domain. Do not copy gitspen
-# or FAS domain rules here.
+# agents.toml - single source of truth for browser-proof assistant instructions.
 
 [meta]
-project = "pagedb-opfs"
+project = "silopal-pagedb-browser-proofs"
 canonical_reference = """
-pagedb-opfs = the browser test harness + durability oracle for pagedb's OPFS
-storage backend. The backend implementation itself lives in the pagedb fork
+silopal-pagedb-browser-proofs = the browser test harness + durability oracle
+for pagedb's OPFS storage backend. The backend implementation itself lives in the pagedb fork
 at ~/code/pres/vendor/pagedb (branch feat/opfs-sync-backend), developed here
 and PR'd upstream to github.com/NodeDB-Lab/pagedb. The reference upstream
 checkout at ~/src/lodefolio/data/databases/pagedb is pristine - never edit it.
@@ -16,10 +13,10 @@ PRD: docs/prd/2026-07-02-pagedb-opfs-adapter.md. Plan: docs/plans/.
 
 [vcs]
 notes = """
-jj-colocated, jj-first (jj new / jj describe / jj bookmark). Gitea origin:
-ssh://git@git.telpher.stream:2222/awb/pagedb-opfs.git. The vendor pagedb fork
-stays plain git (upstream PR discipline); its remotes: origin = NodeDB-Lab
-GitHub (PR target, never push), gitea = user's fork mirror (push allowed).
+This repository is consumed as the `browser-proofs` Git submodule by
+silopal-pagedb-opfs. The vendor pagedb fork stays plain git (upstream PR
+discipline); its remotes: origin = NodeDB-Lab GitHub (PR target, never push),
+gitea = user's fork mirror (push allowed).
 """
 
 [testing]
