@@ -223,7 +223,7 @@ just test-native    # native-side tests (codec, receipt reference)
 
 ## Gitea Actions prerequisite
 
-The `pagedb-opfs smoke` workflow fetches PageDB from a separate private Gitea
+The `rust-browser-proofs PageDB suite smoke` workflow fetches PageDB from a separate private Gitea
 repository. Before it can run, add a read-only `PAGEDB_DEPLOY_KEY` repository
 Actions secret whose public half is authorized as a deploy key on `awb/pagedb`.
 The workflow validates this prerequisite before attempting Rust setup or a git

@@ -88,8 +88,13 @@ not executed, or blocked by the prerequisite stated beside it.
   Homebrew Rust, whose sysroot lacks that target.
 - [x] `cargo fmt --all -- --check` and workspace Clippy passed.
 - [x] Gitea workflow YAML parses and includes the generic consumer wasm check.
-- [ ] A remote Gitea Actions run has not been observed for this revision. It
-  still requires the read-only `PAGEDB_DEPLOY_KEY` Actions secret.
+- [x] Gitea Actions run
+  [`2456`](https://git.telpher.stream/awb/rust-browser-proofs/actions/runs/2456)
+  passed on `4660191`: it fetched the private PageDB dependency through the
+  runner's internal Gitea SSH route, then completed formatting, Clippy, native
+  tests, consumer Wasm compilation, and the PageDB Wasm check. The
+  `PAGEDB_DEPLOY_KEY` secret is a dedicated read-only deploy key for this
+  repository's workflow.
 
 ## Containerized Desktop Lane
 
