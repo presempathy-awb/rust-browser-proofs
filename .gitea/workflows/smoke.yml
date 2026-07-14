@@ -41,15 +41,15 @@ jobs:
             exit 1
           fi
           cat >> ~/.ssh/config <<'EOF'
-          Host git.telpher.stream
-            HostName gitea
-            Port 22
+          Host gitea
             User git
             IdentityFile ~/.ssh/id_ed25519
             IdentitiesOnly yes
             StrictHostKeyChecking yes
           EOF
           chmod 600 ~/.ssh/config
+          git config --global url."ssh://git@gitea:22/".insteadOf \
+            "ssh://git@git.telpher.stream:2222/"
       - name: Install Rust 1.95 + wasm target
         run: |
           set -eu
