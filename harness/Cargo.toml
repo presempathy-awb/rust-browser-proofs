@@ -60,6 +60,7 @@ web-sys = { version = "0.3", features = [
 ] }
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+rust-browser-proofs = { path = "../crates/rust-browser-proofs" }
 wasm-bindgen-test = "0.3"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]

@@ -1,13 +1,13 @@
-# silopal-pagedb-browser-proofs smoke - Gitea Actions (modeled on telpher-smoke.yml).
+# rust-browser-proofs PageDB suite smoke - Gitea Actions (modeled on telpher-smoke.yml).
 #
-# Scope: fmt + clippy + native tests + wasm32 compile check.
+# Scope: fmt + clippy + native tests + generic-consumer and PageDB wasm32 checks.
 # The browser suites (wasm-pack test --headless) run LOCALLY via `just
 # test-browsers` - the runner has no Chrome/Firefox.
 #
 # The pagedb dependency is a PRIVATE git dep on this Gitea instance, so the
 # runner needs the PAGEDB_DEPLOY_KEY secret: a read-only deploy key for
 # awb/pagedb (Settings -> Deploy keys). Without it the build fails at fetch.
-name: silopal-pagedb-browser-proofs smoke
+name: rust-browser-proofs PageDB suite smoke
 
 on: [push, workflow_dispatch]
 
@@ -51,11 +51,12 @@ jobs:
           rustup default 1.95
           rustup component add rustfmt clippy
           rustup target add wasm32-unknown-unknown
-      - name: fmt + clippy + native tests + wasm check
+      - name: fmt + clippy + native tests + wasm checks
         run: |
           set -eu
           . "$HOME/.cargo/env" 2>/dev/null || true
           cargo fmt --all -- --check
           cargo clippy --workspace --all-targets -- -D warnings
           cargo test --workspace
+          cargo run -p rust-browser-proofs -- -- cargo check -p rust-browser-proofs-consumer-fixture --target wasm32-unknown-unknown --tests
           cargo check -p pagedb-opfs-harness --target wasm32-unknown-unknown

@@ -1,0 +1,10 @@
+# The configured hooks only verify state. Avoid Lefthook's partially-staged
+# checkout guard, which can reset a dirty nested checkout before a read-only
+# command runs. `command` bypasses this shell function for the real executable.
+lefthook() {
+    if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+        command lefthook "$@"
+        return
+    fi
+    command lefthook "$@" --no-stage-fixed
+}

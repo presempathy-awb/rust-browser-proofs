@@ -2,7 +2,6 @@
 members = [
     "crates/rust-browser-proofs",
     "fixtures/consumer-battery",
-    "harness",
 ]
 resolver = "2"
 

@@ -1,19 +1,138 @@
-# silopal-pagedb-browser-proofs
+# rust-browser-proofs
 
-Browser test harness and crash oracle for [pagedb](https://github.com/NodeDB-Lab/pagedb)'s
-OPFS backend — the in-worker synchronous `FileSystemSyncAccessHandle`
-implementation whose original `feat/opfs-sync-backend` history is merged on
-the author's Gitea `main` branch.
+Source-owned browser proof host for Rust/Wasm projects. It packages a dev-only
+crate that emits real-browser OPFS proof batteries in a consumer's own test
+crate, alongside browser runners and the PageDB-specific durability suite.
+Nothing here is a production runtime dependency.
 
-pagedb is an encrypted, portable, embedded page store in pure Rust. This
-repo proves its OPFS backend against real browsers: every suite runs inside
-a dedicated Web Worker (the only context where OPFS sync access handles
-exist) in headless Chromium and Firefox.
+The current suite is a browser test harness and crash oracle for
+[pagedb](https://github.com/NodeDB-Lab/pagedb)'s OPFS backend — the in-worker
+synchronous `FileSystemSyncAccessHandle` implementation whose original
+`feat/opfs-sync-backend` history is merged on the author's Gitea `main`
+branch. Every suite runs inside a dedicated Web Worker, the only context where
+OPFS sync access handles exist, in headless Chromium and Firefox.
 
-`silopal-pagedb-opfs` consumes this repository as a pinned Git submodule.
-This suite is independently runnable and owns the test sources, browser
-drivers, mobile runners, and durable-browser acceptance criteria. It is not a
-runtime dependency and does not expose a generic test framework API.
+`silopal-pagedb-opfs` consumes this repository as its pinned `browser-proofs`
+Git submodule. The current PageDB crate remains deliberately suite-specific:
+it proves a PageDB storage contract and is not presented as a generic runtime
+library.
+
+## Repository Topology
+
+Gitea is the canonical private repository and CI authority:
+`ssh://git@git.telpher.stream:2222/awb/rust-browser-proofs.git`. Its `main`
+branch runs the Gitea Actions smoke workflow. GitHub is the public mirror at
+`https://github.com/presempathy-awb/rust-browser-proofs`; it is intentionally
+not the authoritative CI surface because the PageDB test dependency is private.
+
+## Reuse Model
+
+Use `crates/rust-browser-proofs` as a dev dependency, never a production
+dependency. Its `opfs_worker_battery!()` macro emits a dedicated-worker OPFS
+test battery in the consumer's own wasm integration-test crate, which is the
+only place Cargo and `wasm-pack` can discover and run it. The battery currently
+proves raw sync-handle write/flush/reopen/read behavior plus a bounded raw I/O
+baseline. It makes no claim about a consumer's database protocol.
+
+Consumers also declare `wasm-bindgen-test` directly for their wasm test target.
+That crate generates the browser test harness inside the consumer's test crate;
+Rust dependencies cannot hide that generated harness dependency transitively.
+
+The `harness/` package is the first consumer and remains deliberately
+PageDB-specific: VFS semantics, crash oracles, manifests, receipts, and the
+private PageDB dependency stay there. A future backend adapter may add a
+separate contract battery once it can define real reopen, publication, and
+fault-injection semantics without flattening them into generic OPFS claims.
+
+`fixtures/consumer-battery` is the minimal downstream proof: it depends only
+on `rust-browser-proofs` and emits the public battery without PageDB.
+
+## Command Runner
+
+The crate also provides a local test-command runner. It does not define a new
+test syntax: it forwards a normal command after placing Rustup's selected
+`rustc` and `cargo` first in the child environment. This prevents the ambient
+Homebrew Rust from being selected when it lacks the `wasm32-unknown-unknown`
+target. It preserves the caller's current directory, so `wasm-pack` must run
+from a Cargo package rather than this repository's virtual workspace root.
+After `mise trust .mise.toml`, Mise adds the checked-in `bin/` entrypoint to
+this project's `PATH`:
+
+```sh
+cd fixtures/consumer-battery
+rust-browser-proofs -- wasm-pack test --headless --chrome
+```
+
+For a root-level check, forward a regular workspace-aware command instead:
+
+```sh
+rust-browser-proofs -- cargo test --workspace
+```
+
+Generate a host capability report without claiming that any browser test ran:
+
+```sh
+rust-browser-proofs --report /tmp/rust-browser-proofs-environment.md
+```
+
+Record the result of one explicit browser invocation in the same report:
+
+```sh
+cd fixtures/consumer-battery
+rust-browser-proofs \
+  --report /tmp/rust-browser-proofs-chrome.md \
+  -- wasm-pack test --headless --chrome
+```
+
+The report has separate host-prerequisite and execution-evidence columns. A
+detected browser, driver, device tool, or simulator never becomes a passed
+browser test unless the exact invocation identifies that browser and exits
+successfully. `just report-environment` writes the report to
+`/tmp/rust-browser-proofs-environment.md` by default.
+
+The explicit Cargo form is equivalent and works from a sibling package checkout:
+
+```sh
+cargo run \
+  --manifest-path /Users/andrew/code/pres/brow/rust-browser-proofs/crates/rust-browser-proofs/Cargo.toml \
+  -- -- wasm-pack test --headless --chrome
+```
+
+`cargo install --path crates/rust-browser-proofs` is an optional global
+convenience, not a setup requirement. Reinstall it after local runner changes;
+the Mise entrypoint always runs the current checkout.
+
+See [`docs/browser-environment-checklist.md`](docs/browser-environment-checklist.md)
+for current browser, device, driver, and CI evidence.
+
+## Containerized Desktop Proofs
+
+[`Dockerfile`](Dockerfile) provides a local Linux desktop-browser environment
+without host Rust, Mise, Node, browser, or driver installation. The host still
+needs a Docker-compatible engine. Run `just container-build`, then use the
+container check, Chrome, Firefox, or report recipes described in
+[`docs/container.md`](docs/container.md). Safari/iPhone and the Android
+device/emulator lane remain native platform concerns rather than container
+coverage. The container document also includes raw Docker commands for hosts
+that do not have `just` installed.
+
+## Verification and Security Commands
+
+`just verify` runs native formatting, lint, tests, the Wasm compile check, the
+regular-command runner, and source/config/secret scanning. `just container-verify`
+runs the container workspace check and scans the locally built image. `just
+security` runs both scanners directly.
+
+After `mise trust .mise.toml`, the same commands are available through `mise
+run verify`, `mise run container-verify`, `mise run security`, `mise run
+security-source`, and `mise run security-image`. `just setup` installs the
+Lefthook gates: source security before commit, then native and container
+verification before push. The scanner is a digest-pinned Docker image and does
+not add a Rust or JavaScript dependency to this workspace. The hooks are
+read-only verification and preserve partially staged working trees.
+
+For a copy-ready local and hosted consumer handoff, see
+[`docs/using-rust-browser-proofs.md`](docs/using-rust-browser-proofs.md).
 
 ## Browser durability target matrix
 

@@ -1,8 +1,14 @@
-# pagedb-opfs - operational recipes
+# rust-browser-proofs - generic test-kit checks and PageDB OPFS suite recipes
 # Run `just` (no args) to list recipes.
 
 set dotenv-load := true
 set shell := ["bash", "-uc"]
+
+container_image := "rust-browser-proofs:local"
+# Trivy v0.70.0 multi-architecture manifest list. The digest prevents mutable
+# tag drift while preserving native scanner images on supported CI architectures.
+trivy_image := "aquasec/trivy@sha256:be1190afcb28352bfddc4ddeb71470835d16462af68d310f9f4bca710961a41e"
+trivy_cache_volume := "rust-browser-proofs-trivy-cache"
 
 default:
     @just --list
@@ -205,7 +211,7 @@ install-iphone-chrome: install-iphone-safari
 # The crash oracle embeds a second, self-contained wasm bundle (the
 # sacrificial worker's driver) built from the harness lib itself.
 build-driver:
-    cd harness && wasm-pack build --dev --target no-modules --no-typescript --out-dir pkg-driver
+    cd harness && mise exec -- sh -c 'toolchain="$(dirname "$(rustup which rustc)")"; export PATH="$toolchain:$PATH" RUSTC="$toolchain/rustc" CARGO="$toolchain/cargo"; wasm-pack build --dev --target no-modules --no-typescript --out-dir pkg-driver'
 
 # Self-contained IDB worker for the file-sync termination oracle. The normal
 # `idb` feature remains module-based so production Web Locks keep their exact
@@ -340,17 +346,18 @@ check-iphone-chrome: install-iphone-chrome
     echo "iphone_chrome_simulator=booted"
 
 test-chrome: check-chrome-driver build-driver
-    cd harness && WASM_BINDGEN_TEST_TIMEOUT=120 wasm-pack test --headless --chrome --chromedriver "{{justfile_directory()}}/.tools/chromedriver"
+    cd harness && mise exec -- sh -c 'toolchain="$(dirname "$(rustup which rustc)")"; export PATH="$toolchain:$PATH" RUSTC="$toolchain/rustc" CARGO="$toolchain/cargo" WASM_BINDGEN_TEST_TIMEOUT=120; wasm-pack test --headless --chrome --chromedriver "{{justfile_directory()}}/.tools/chromedriver"'
 
 test-firefox: build-driver
-    cd harness && WASM_BINDGEN_TEST_TIMEOUT=120 wasm-pack test --headless --firefox
+    cd harness && mise exec -- sh -c 'toolchain="$(dirname "$(rustup which rustc)")"; export PATH="$toolchain:$PATH" RUSTC="$toolchain/rustc" CARGO="$toolchain/cargo" WASM_BINDGEN_TEST_TIMEOUT=120; wasm-pack test --headless --firefox'
 
 test-safari: check-safari-driver build-driver
     #!/usr/bin/env bash
     set -euo pipefail
     cd harness
     for suite in bootstrap conformance engine idb_spike manifest oracle raw_sync_benchmark receipt_browser registry smoke vfs_basic; do
-        WASM_BINDGEN_TEST_TIMEOUT=300 wasm-pack test --headless --safari --safaridriver /usr/bin/safaridriver --test "$suite"
+        toolchain="$(dirname "$(rustup which rustc)")"
+        PATH="$toolchain:$PATH" RUSTC="$toolchain/rustc" CARGO="$toolchain/cargo" WASM_BINDGEN_TEST_TIMEOUT=300 wasm-pack test --headless --safari --safaridriver /usr/bin/safaridriver --test "$suite"
     done
 
 test-android-chrome suite="bootstrap" keep_emulator="0" wall_timeout="120" test_timeout="90":
@@ -376,6 +383,8 @@ test-android-chrome suite="bootstrap" keep_emulator="0" wall_timeout="120" test_
     trap cleanup EXIT
     trap 'cleanup; exit 130' INT
     trap 'cleanup; exit 143' TERM
+    toolchain="$(dirname "$(rustup which rustc)")"
+    export PATH="$toolchain:$PATH" RUSTC="$toolchain/rustc" CARGO="$toolchain/cargo"
     just check-android-chrome
     just build-driver
     cd harness
@@ -446,7 +455,8 @@ test-iphone-safari: check-safari-driver check-iphone-safari build-driver
     trap cleanup EXIT
     printf '{ "browserName": "safari", "platformName": "ios", "safari:useSimulator": true }\n' > webdriver.json
     for suite in bootstrap conformance engine idb_spike manifest oracle raw_sync_benchmark receipt_browser registry smoke vfs_basic; do
-        WASM_BINDGEN_TEST_TIMEOUT=300 wasm-pack test --headless --safari --safaridriver /usr/bin/safaridriver --test "$suite"
+        toolchain="$(dirname "$(rustup which rustc)")"
+        PATH="$toolchain:$PATH" RUSTC="$toolchain/rustc" CARGO="$toolchain/cargo" WASM_BINDGEN_TEST_TIMEOUT=300 wasm-pack test --headless --safari --safaridriver /usr/bin/safaridriver --test "$suite"
     done
 
 run-android-chrome url="about:blank": check-android-chrome
@@ -496,6 +506,69 @@ test-browsers: test-chrome test-firefox
 
 test-browsers-all: test-chrome test-firefox test-safari
 
+# Consumer compile proof: this fixture only depends on the generic test crate
+# and emits its own test battery through the public macro.
+check-consumer-battery:
+    cargo run -p rust-browser-proofs -- -- cargo check -p rust-browser-proofs-consumer-fixture --target wasm32-unknown-unknown --tests
+
+test-consumer-battery-chrome: check-chrome-driver
+    cd fixtures/consumer-battery && cargo run --manifest-path ../../crates/rust-browser-proofs/Cargo.toml -- -- wasm-pack test --headless --chrome --chromedriver "{{justfile_directory()}}/.tools/chromedriver"
+
+check-command-runner:
+    cargo run -p rust-browser-proofs -- -- /usr/bin/env true
+
+report-environment report_path="/tmp/rust-browser-proofs-environment.md":
+    cargo run -p rust-browser-proofs -- --report "{{report_path}}"
+
+container-build:
+    docker build --tag "{{container_image}}" --file Dockerfile .
+
+container-check: container-build
+    docker run --rm "{{container_image}}" bash -c 'cd "$RUST_BROWSER_PROOFS_WORKSPACE" && cargo test --workspace && cargo check -p rust-browser-proofs-consumer-fixture --target wasm32-unknown-unknown --tests'
+
+container-test-consumer-chrome: container-build
+    docker run --rm --shm-size=1g "{{container_image}}" bash -c 'cd "$RUST_BROWSER_PROOFS_WORKSPACE/fixtures/consumer-battery" && rust-browser-proofs -- wasm-pack test --headless --chrome --chromedriver /usr/bin/chromedriver --test opfs_battery'
+
+container-test-consumer-firefox: container-build
+    docker run --rm --shm-size=1g "{{container_image}}" bash -c 'cd "$RUST_BROWSER_PROOFS_WORKSPACE/fixtures/consumer-battery" && rust-browser-proofs -- wasm-pack test --headless --firefox --test opfs_battery'
+
+container-report report_path="/tmp/rust-browser-proofs-container-environment.md": container-build
+    #!/usr/bin/env bash
+    set -euo pipefail
+    name="rust-browser-proofs-report-$$"
+    trap 'docker rm -f "$name" >/dev/null 2>&1 || true' EXIT
+    docker create --name "$name" "{{container_image}}" bash -c 'rust-browser-proofs --report /tmp/environment.md' >/dev/null
+    docker start -a "$name"
+    mkdir -p "$(dirname "{{report_path}}")"
+    docker cp "$name:/tmp/environment.md" "{{report_path}}"
+    echo "rust-browser-proofs: copied container report to {{report_path}}"
+
+# Scan the source tree without giving the scanner write access to this checkout
+# or access to the Docker socket. The cache volume holds only Trivy databases.
+security-source:
+    docker run --rm --read-only --cap-drop ALL --security-opt no-new-privileges:true --tmpfs /tmp:rw,noexec,nosuid,size=512m --mount type=volume,source="{{trivy_cache_volume}}",target=/root/.cache --mount type=bind,source="{{justfile_directory()}}",target=/workspace,readonly "{{trivy_image}}" fs --scanners vuln,misconfig,secret --severity HIGH,CRITICAL --exit-code 1 --skip-dirs .git --skip-dirs target --skip-dirs .tools --skip-version-check /workspace
+
+# Save the local image first so the scanner needs neither Docker's socket nor
+# daemon privileges. Ignore unfixed findings in this blocking gate; the report
+# remains actionable when the base image cannot yet remediate an advisory.
+security-image: container-build
+    #!/usr/bin/env bash
+    set -euo pipefail
+    scan_dir="$(mktemp -d "${TMPDIR:-/tmp}/rust-browser-proofs-scan.XXXXXX")"
+    trap 'rm -rf "$scan_dir"' EXIT
+    docker save --output "$scan_dir/image.tar" "{{container_image}}"
+    docker run --rm --read-only --cap-drop ALL --security-opt no-new-privileges:true --tmpfs /tmp:rw,noexec,nosuid,size=512m --mount type=volume,source="{{trivy_cache_volume}}",target=/root/.cache --mount type=bind,source="$scan_dir",target=/scan,readonly "{{trivy_image}}" image --input /scan/image.tar --scanners vuln,secret --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --skip-version-check
+
+# Complete supply-chain gate: source/config/secrets plus the built runtime image.
+security: security-source security-image
+
+# Native integrity gate used by Mise and the pre-push hook. Browser execution is
+# intentionally a separate, explicit proof because it needs real browser drivers.
+verify: fmt-check lint test-native wasm-check check-command-runner security-source
+
+# Container integrity gate used by Mise and the pre-push hook.
+container-verify: container-check security-image
+
 # Native-side tests (manifest codec, receipt reference, etc.)
 test-native:
     cargo test --workspace
@@ -511,4 +584,4 @@ lint:
 
 # Compile-check the harness for wasm32 without running browsers
 wasm-check:
-    cargo check -p pagedb-opfs-harness --target wasm32-unknown-unknown
+    mise exec -- sh -c 'toolchain="$(dirname "$(rustup which rustc)")"; export PATH="$toolchain:$PATH" RUSTC="$toolchain/rustc" CARGO="$toolchain/cargo"; cargo check -p pagedb-opfs-harness --target wasm32-unknown-unknown'

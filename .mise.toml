@@ -1,12 +1,35 @@
 # mise - runtime/tool version pinning (telpher-family convention)
 # Run `mise trust .mise.toml` then `mise install`.
 
+[env]
+_.path = "./bin"
+
 [tools]
 rust = "1.95"
 jj = "0.41"
 just = "1.52.0"
 "aqua:rustwasm/wasm-pack" = "latest"
 lefthook = "2.1.9"
+
+[tasks.verify]
+description = "Run native formatting, lint, test, wasm, runner, and source-security checks"
+run = "just verify"
+
+[tasks.container-verify]
+description = "Build and validate the self-contained desktop-browser image"
+run = "just container-verify"
+
+[tasks.security]
+description = "Scan the source tree and locally built container image"
+run = "just security"
+
+[tasks.security-source]
+description = "Scan source, configuration, and secrets through the pinned Trivy image"
+run = "just security-source"
+
+[tasks.security-image]
+description = "Scan the locally built container image through a Docker archive"
+run = "just security-image"
 
 [settings]
 experimental = false

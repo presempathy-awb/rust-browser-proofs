@@ -1,29 +1,56 @@
 # agents.toml - single source of truth for browser-proof assistant instructions.
 
 [meta]
-project = "silopal-pagedb-browser-proofs"
+project = "rust-browser-proofs"
 canonical_reference = """
-silopal-pagedb-browser-proofs = the browser test harness + durability oracle
-for pagedb's OPFS storage backend. The backend implementation itself lives in the pagedb fork
-at ~/code/pres/vendor/pagedb (branch feat/opfs-sync-backend), developed here
-and PR'd upstream to github.com/NodeDB-Lab/pagedb. The reference upstream
-checkout at ~/src/lodefolio/data/databases/pagedb is pristine - never edit it.
+rust-browser-proofs = a source-owned Rust/Wasm browser-proof workspace.
+`crates/rust-browser-proofs` is a dev-only generic OPFS test battery. It emits
+dedicated-worker browser tests in a consumer's own crate and never selects a
+runtime storage backend. `harness/` is the PageDB-specific durability oracle.
+The PageDB backend implementation itself lives in the pagedb fork at
+~/code/pres/vendor/pagedb (branch feat/opfs-sync-backend), developed here and
+PR'd upstream to github.com/NodeDB-Lab/pagedb. The reference upstream checkout
+at ~/src/lodefolio/data/databases/pagedb is pristine - never edit it.
 PRD: docs/prd/2026-07-02-pagedb-opfs-adapter.md. Plan: docs/plans/.
 """
 
 [vcs]
 notes = """
 This repository is consumed as the `browser-proofs` Git submodule by
-silopal-pagedb-opfs. The vendor pagedb fork stays plain git (upstream PR
-discipline); its remotes: origin = NodeDB-Lab GitHub (PR target, never push),
-gitea = user's fork mirror (push allowed).
+silopal-pagedb-opfs. Its remotes are origin = private canonical Gitea
+`awb/rust-browser-proofs` (main and Gitea Actions) and github = public
+`presempathy-awb/rust-browser-proofs` mirror. Do not add a GitHub Actions
+workflow: Gitea Actions is the authoritative CI surface because the PageDB
+suite fetches a private Gitea dependency. The PageDB suite uses the vendor
+pagedb fork for upstream PR discipline; its remotes: origin = NodeDB-Lab GitHub
+(PR target, never push), gitea = user's fork mirror (push allowed).
 """
 
 [testing]
 notes = """
 Browser suites run via `just test-chrome` / `just test-firefox` (wasm-pack,
 headless, dedicated worker - OPFS sync access handles exist nowhere else).
-Native-side tests via `just test-native`. Every browser test must isolate its
-OPFS namespace (unique subdirectory) and clean up - origin state persists
-across tests in one browser session.
+The generic consumer compile contract is `just check-consumer-battery`; native
+workspace tests run through `just test-native`. `rust-browser-proofs --
+<command>` forwards a regular test command under the Rustup toolchain because
+the ambient Homebrew Rust may not own the wasm target. After `mise trust
+.mise.toml`, the checked-in `bin/` entrypoint supplies the command without a
+global install. `rust-browser-proofs --report <path>` writes a Markdown host
+capability report; it must distinguish prerequisite availability from actual
+browser execution. `just container-build` owns the local Linux desktop-browser
+image; it cannot prove Safari/iPhone or the Android device/emulator lane. Every
+browser test must isolate its OPFS namespace (unique subdirectory) and clean up
+- origin state persists across tests in one browser session. Current proof
+evidence lives in docs/browser-environment-checklist.md. `just verify` is the
+native integrity gate and includes the source/config/secret scan; `just
+container-verify` checks and scans the locally built desktop-browser image;
+`just security` runs both scan gates. Trivy runs from a pinned container image,
+gets a read-only source tree or image archive, and never receives the Docker
+socket. `just setup` installs source scanning before commit and native plus
+container verification before push. Use `mise run verify`, `mise run
+container-verify`, or `mise run security` for the same gates after trusting the
+Mise config. The image gate blocks fixable high/critical findings and explicitly
+does not treat ignored unfixed base-image advisories as remediated. These hooks
+are verification-only: `.lefthookrc` invokes Lefthook with `--no-stage-fixed`
+so its partial-staging safeguard never resets a dirty nested checkout.
 """

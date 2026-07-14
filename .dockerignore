@@ -1,0 +1,7 @@
+.cargo/config.toml
+.git
+.tools
+target
+harness/pkg-driver
+harness/pkg-idb-driver
+harness/webdriver.json
