@@ -36,10 +36,20 @@ jobs:
           mkdir -p ~/.ssh
           printf '%s\n' "$PAGEDB_DEPLOY_KEY" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
-          if ! ssh-keyscan -p 2222 git.telpher.stream >> ~/.ssh/known_hosts 2>/dev/null; then
-            echo "::error::Unable to reach git.telpher.stream:2222 from this Actions runner."
+          if ! ssh-keyscan -p 22 gitea >> ~/.ssh/known_hosts 2>/dev/null; then
+            echo "::error::Unable to reach the internal Gitea SSH service from this Actions runner."
             exit 1
           fi
+          cat >> ~/.ssh/config <<'EOF'
+          Host git.telpher.stream
+            HostName gitea
+            Port 22
+            User git
+            IdentityFile ~/.ssh/id_ed25519
+            IdentitiesOnly yes
+            StrictHostKeyChecking yes
+          EOF
+          chmod 600 ~/.ssh/config
       - name: Install Rust 1.95 + wasm target
         run: |
           set -eu
