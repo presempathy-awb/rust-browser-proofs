@@ -24,6 +24,16 @@ workflow: Gitea Actions is the authoritative CI surface because the PageDB
 suite fetches a private Gitea dependency. The PageDB suite uses the vendor
 pagedb fork for upstream PR discipline; its remotes: origin = NodeDB-Lab GitHub
 (PR target, never push), gitea = user's fork mirror (push allowed).
+
+This checkout is permanently jj-colocated. Use `mise exec -- jj` for
+working-copy mutations and history operations; `jj status`, `jj diff`, and `jj
+op log` are authoritative. Git is retained for read-only inspection and tools
+that require Git compatibility; do not use `git add`, `git commit`, `git
+checkout`, `git reset`, or `git rebase` here. The local `main` bookmark tracks
+both `origin` and `github`. Push review bookmarks to Gitea first, require the
+Gitea Actions result, then mirror the exact verified `main` commit to GitHub.
+Before every `jj git push`, run `just verify`, `just container-verify`, and the
+relevant explicit browser proof.
 """
 
 [testing]

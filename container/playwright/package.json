@@ -1,0 +1,9 @@
+{
+  "name": "rust-browser-proofs-playwright-container",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Pinned container-only Playwright Core runner for the public OPFS battery.",
+  "dependencies": {
+    "playwright-core": "1.61.1"
+  }
+}

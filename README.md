@@ -25,6 +25,28 @@ branch runs the Gitea Actions smoke workflow. GitHub is the public mirror at
 `https://github.com/presempathy-awb/rust-browser-proofs`; it is intentionally
 not the authoritative CI surface because the PageDB test dependency is private.
 
+## Version Control
+
+This is a permanent colocated Jujutsu/Git workspace. Use the Mise-pinned jj for
+all local history and working-copy mutations; use Git for inspection and tools
+that require Git compatibility. `.jj` is local workspace state and is excluded
+from Git automatically. `jj status` and `jj diff` are the source of truth for
+the current change.
+
+```sh
+mise exec -- jj status
+mise exec -- jj diff
+mise exec -- jj op log
+mise exec -- jj git fetch --all-remotes
+```
+
+The local `main` bookmark tracks both remotes. Gitea `origin` is the promotion
+authority: push a review bookmark there, require its Actions result, then move
+`main` and mirror that exact verified commit to GitHub. Before every `jj git
+push`, run `just verify`, `just container-verify`, and the relevant explicit
+browser proof. Use `jj describe` and `jj bookmark create` rather than `git
+commit` or `git checkout` in this checkout.
+
 ## Reuse Model
 
 Use `crates/rust-browser-proofs` as a dev dependency, never a production
@@ -110,11 +132,12 @@ for current browser, device, driver, and CI evidence.
 [`Dockerfile`](Dockerfile) provides a local Linux desktop-browser environment
 without host Rust, Mise, Node, browser, or driver installation. The host still
 needs a Docker-compatible engine. Run `just container-build`, then use the
-container check, Chrome, Firefox, or report recipes described in
+container check, Chrome, Firefox, Playwright, Puppeteer, or report recipes described in
 [`docs/container.md`](docs/container.md). Safari/iPhone and the Android
 device/emulator lane remain native platform concerns rather than container
-coverage. The container document also includes raw Docker commands for hosts
-that do not have `just` installed.
+coverage. The Android route boots and targets an AVD only; it never needs or
+selects an attached phone. The container document also includes raw Docker
+commands for hosts that do not have `just` installed.
 
 ## Verification and Security Commands
 
@@ -145,8 +168,12 @@ separate proof gates and do not make fallback selection available.
 |---|---|---|
 | Desktop Chrome/Chromium | `just test-chrome` | Automated durable OPFS suite. Uses the repo-pinned `.tools/chromedriver` after `just check-chrome-driver`. |
 | Desktop Firefox | `just test-firefox` | Automated durable OPFS suite. `wasm-pack` manages GeckoDriver when needed. |
+| Desktop Edge | `just test-consumer-battery-edge` | Headless Edge proof using its local DevTools endpoint. It verifies browser output directly instead of the upstream runner's stale Edge WebDriver integration. |
+| Playwright Chromium | `just container-test-consumer-playwright` | Container-only, pinned `playwright-core` proof against Debian Chromium. It verifies an independent automation path without downloading a Playwright-managed browser. |
+| Puppeteer Chromium | `just container-test-consumer-puppeteer` | Container-only, pinned `puppeteer-core` proof against Debian Chromium. It launches Chromium headlessly with its supported sandbox; it does not download a Puppeteer-managed browser. |
+| Opera | Deferred | Opera is Chromium-derived, not an independent engine. The container deliberately does not add a third-party Opera package source without a product-specific need. |
 | Desktop Safari/WebKit | `just test-safari` | Explicit durable OPFS target. Verifies `/usr/bin/safaridriver`, then runs the suite; use `just enable-safari-automation` first if Safari automation is disabled. Do not infer Safari from Chrome or Firefox. |
-| Android Chrome | `ANDROID_SERIAL=<serial> just test-android-chrome` | Device-backed OPFS smoke retry. Runs one bounded suite (`bootstrap` by default), lowers emulator/test priority, and stops the AVD on exit unless `keep_emulator=1`. Use `just test-android-chrome-all` for the full durable matrix. |
+| Android Chrome | `just test-consumer-battery-android-chrome` | Emulator-only generic OPFS battery. It never targets a physical serial, clears the test emulator's Chrome profile for a fresh OPFS quota state, launches Chrome with a temporary local DevTools endpoint, and requires the browser's own success output. The PageDB Android headless recipes remain separate while the upstream runner's Android-headless path is investigated. |
 | iPhone Safari | `just test-iphone-safari` | Simulator-backed WebKit target using `safaridriver` iOS capabilities. Boots `IOS_SIMULATOR_ID` or `iPhone 17 Pro`, verifies MobileSafari, and reuses the SafariDriver automation check before running. |
 | iPhone Chrome | `just install-iphone-chrome` / `just run-iphone-chrome` | App-shell target only. Chrome for iOS uses the iOS WebKit engine class, but the Chrome app shell is not proven unless `com.google.chrome` is installed and driven. If missing, set `IPHONE_CHROME_APP_PATH` to a simulator-compatible Chrome app bundle. |
 
@@ -156,7 +183,15 @@ automation is enabled. Mobile recipes create a temporary `harness/webdriver.json
 for the run and remove it on exit; a checked-in `webdriver.json` is treated as a
 configuration conflict.
 
-Android emulator retries are intentionally conservative. Start with
+`just test-consumer-battery-all` is the no-phone generic matrix: desktop
+Chrome, Firefox, Edge, and Safari; iPhone Safari in an iOS Simulator; and
+Android Chrome in the dedicated emulator. The Android route rejects physical
+serials and clears only the test emulator's Chrome profile before it runs.
+It does not imply that the separate PageDB Android headless recipes have passed.
+
+Android emulator retries are intentionally conservative. Automated Android
+recipes ignore ambient `ANDROID_SERIAL`; set `ANDROID_EMULATOR_SERIAL` only to
+select a particular `emulator-*` instance. Start with
 `just android-status`, then `just test-android-chrome` for the single-suite
 smoke. If the emulator or WebDriver run wedges, `just stop-android-emulator`
 drains only the repo's configured AVD (`ANDROID_AVD`, default
@@ -191,10 +226,10 @@ the PRD and implementation plan are under [`docs/`](docs/).
 
 ## Running
 
-Requires [mise](https://mise.jdx.dev), Chrome or Chromium (plus a matching
-`chromedriver` in `.tools/` — see the justfile note), and Firefox for the
-default desktop proof. Safari and mobile targets have additional WebDriver or
-device prerequisites listed above.
+Requires [mise](https://mise.jdx.dev), Chrome or Chromium, and Firefox for the
+default desktop proof. `just install-chrome-driver` obtains the matching
+ignored `.tools/chromedriver` before strict Chrome tests run. Safari and mobile
+targets have additional WebDriver or device prerequisites listed above.
 
 ```sh
 just setup          # toolchain, wasm target, hooks
@@ -202,8 +237,17 @@ just install-adb    # installs Android platform-tools through Homebrew if adb is
 just enable-safari-automation # enables Safari WebDriver automation when macOS admin auth is available
 just install-iphone-safari # boots/verifies the iPhone simulator Safari
 just install-iphone-chrome # installs IPHONE_CHROME_APP_PATH into the booted simulator when Chrome is missing
+just install-chrome-driver # downloads the Chrome-for-Testing driver matching installed Chrome
 just check-chrome-driver # fast local ChromeDriver preflight
 just check-safari-driver # verifies SafariDriver can create an automation session
+just test-consumer-battery # generic public battery in headless Chrome and Firefox
+just test-consumer-battery-edge # generic public battery in headless Microsoft Edge
+just test-consumer-battery-webkit # generic public battery in desktop and iPhone Safari
+just test-consumer-battery-android-chrome # generic public battery in an Android emulator, without a phone
+just test-consumer-battery-all # all configured generic browser targets without a physical phone
+just container-test-consumer-playwright # public battery through Playwright Core inside Docker
+just container-test-consumer-puppeteer # public battery through Puppeteer Core inside Docker
+just container-test-consumer-desktop # Docker Chrome, Firefox, Playwright, and Puppeteer Chromium batteries
 just test-chrome    # all suites, headless Chromium
 just test-firefox   # default suites, headless Firefox
 just test-safari    # all suites, Safari/WebKit when remote automation is enabled
@@ -213,7 +257,7 @@ just test-android-chrome engine # bounded retry of one named Android Chrome suit
 just test-android-chrome-all # full Android Chrome suite matrix; still stops emulator on exit
 just stop-android-emulator # normal cleanup for the configured Android AVD
 just test-iphone-safari # all suites, booted iPhone simulator Safari
-just run-android-chrome "http://127.0.0.1:8000" # launch Chrome on the selected Android device
+just run-android-chrome "http://127.0.0.1:8000" # launch Chrome on the selected Android emulator
 just run-iphone-safari "http://127.0.0.1:8000" # launch MobileSafari in the booted simulator
 just run-iphone-chrome "http://127.0.0.1:8000" # launch Chrome iOS app shell when installed
 just test-idb-chrome # local-only IDB spike, VFS, file-sync crash, receipt, and cross-worker/cross-tab lock proof

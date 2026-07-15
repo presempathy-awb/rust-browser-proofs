@@ -17,6 +17,9 @@ just container-build
 just container-check
 just container-test-consumer-chrome
 just container-test-consumer-firefox
+just container-test-consumer-playwright
+just container-test-consumer-puppeteer
+just container-test-consumer-desktop
 just container-report /tmp/rust-browser-proofs-container.md
 just security-source
 just security-image
@@ -69,6 +72,29 @@ the Firefox battery. The first Firefox run downloads GeckoDriver through
 `wasm-pack` into the container user's cache. No host Rust, Mise, Node, browser,
 or browser driver is involved in either command.
 
+Run the container-only Playwright proof directly with:
+
+```sh
+docker run --rm --shm-size=1g rust-browser-proofs:local \
+  bash /opt/rust-browser-proofs/playwright/run-opfs-battery.sh
+```
+
+It launches the image's `/usr/bin/chromium` headlessly through pinned
+`playwright-core`. The image has no Playwright-managed browser download.
+
+Run the container-only Puppeteer proof directly with:
+
+```sh
+docker run --rm --init --cap-add=SYS_ADMIN --shm-size=1g rust-browser-proofs:local \
+  bash /opt/rust-browser-proofs/puppeteer/run-opfs-battery.sh
+```
+
+It launches the image's `/usr/bin/chromium` headlessly through pinned
+`puppeteer-core`. Its locked dependency tree contains 80 packages and has no
+Puppeteer-managed browser download. `SYS_ADMIN` is scoped to this invocation so
+Chromium's supported Linux sandbox can create its nested namespaces; the runner
+does not use `--no-sandbox`.
+
 ## Scope Boundary
 
 | Target | Container status | Reason |
@@ -76,14 +102,32 @@ or browser driver is involved in either command.
 | Rust/Wasm compile | Supported | Rustup, wasm target, and wasm-pack are installed in the image. |
 | Desktop Chromium | Supported | Debian installs Chromium and its matching ChromeDriver. |
 | Desktop Firefox | Supported | Firefox ESR is in the image; `wasm-pack` downloads GeckoDriver into the container cache on first use. |
+| Playwright Chromium | Supported | Pinned `playwright-core` launches the image's Debian Chromium headlessly; it does not download a Playwright-managed browser. |
+| Puppeteer Chromium | Supported | Pinned `puppeteer-core` launches the image's Debian Chromium headlessly. Its 80-package locked tree does not download a Puppeteer-managed browser; only this invocation receives `SYS_ADMIN` so Chromium can retain its sandbox. |
 | Safari/WebKit | Not supported | Safari and SafariDriver require macOS. |
 | iPhone Safari/Chrome | Not supported | iOS Simulator and Chrome for iOS require macOS/Xcode. |
-| Android Chrome | Not default-supported | Device access and emulator virtualization are separate host/device concerns. |
+| Android Chrome | Host emulator | The automated route boots and targets an AVD only, never an attached phone. Docker Desktop on macOS does not expose the nested Android virtualization needed for a reliable default container lane. |
 | Edge | Not supported | No Edge package or named runner is included. |
 
 The image runs as the `browser` user, not root. `container-test-consumer-chrome`
 uses a 1 GiB shared-memory allocation because headless Chromium is sensitive to
 the small default container `/dev/shm` size.
+
+`just container-test-consumer-desktop` runs both container-supported consumer
+batteries plus the independent Playwright-Core and Puppeteer-Core automation
+proofs. The remaining no-phone matrix is deliberately host-simulator backed:
+`just test-consumer-battery-android-chrome` provisions an Android AVD, and
+`just test-consumer-battery-iphone-safari` uses Xcode's iOS Simulator. Neither
+route accepts a physical-device serial. Safari and the iOS Simulator require a
+macOS host; Android can be containerized on suitable Linux/KVM infrastructure,
+but that is not a reliable Docker Desktop default and is intentionally outside
+this image's contract.
+
+Opera is deliberately not installed in this image. It is a Chromium derivative,
+so it does not add an engine class beyond the Chromium coverage already present.
+Adding Opera would require a separate vendor package source and update policy;
+that supply-chain cost is not justified for the generic OPFS battery. Revisit it
+only when a product requirement depends on Opera-specific behavior.
 
 The image runs the generic `rust-browser-proofs` crate and its consumer fixture from
 an internal two-member workspace. It intentionally excludes this repository's PageDB

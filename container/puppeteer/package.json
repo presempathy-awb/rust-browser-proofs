@@ -1,0 +1,9 @@
+{
+  "name": "rust-browser-proofs-puppeteer-container",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Pinned container-only Puppeteer Core runner for the public OPFS battery.",
+  "dependencies": {
+    "puppeteer-core": "24.43.1"
+  }
+}

@@ -6,6 +6,7 @@ _.path = "./bin"
 
 [tools]
 rust = "1.95"
+java = "21.0.2"
 jj = "0.41"
 just = "1.52.0"
 "aqua:rustwasm/wasm-pack" = "latest"

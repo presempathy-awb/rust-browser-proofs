@@ -8,8 +8,9 @@ not executed, or blocked by the prerequisite stated beside it.
 
 - [x] `rust-browser-proofs` remains a dev-only test crate with no PageDB dependency.
 - [x] A standalone consumer fixture compiles for `wasm32-unknown-unknown`.
-- [x] The fixture's `opfs_worker_battery!()` executed in headless Chrome:
-  sync-handle round trip and raw sync baseline both passed.
+- [x] `just test-consumer-battery` executed the fixture's
+  `opfs_worker_battery!()` in headless Chrome and Firefox: sync-handle round
+  trip and raw sync baseline both passed in each engine.
 - [x] `rust-browser-proofs -- <command>` selects Rustup's `rustc` and `cargo`
   for a consumer-selected regular test command.
 - [ ] A hosted Git revision has been pinned and exercised by an unrelated
@@ -32,54 +33,94 @@ not executed, or blocked by the prerequisite stated beside it.
 
 - [x] Google Chrome is installed on this macOS host.
 - [x] The generic consumer and targeted PageDB smoke/raw-sync tests passed via
-  `wasm-pack`'s managed driver.
-- [ ] `browser-proofs/.tools/chromedriver` is present. The strict `just
-  test-chrome` and `just test-consumer-battery-chrome` paths remain blocked
-  until this repo-pinned driver is supplied.
+  `wasm-pack`.
+- [x] `browser-proofs/.tools/chromedriver` is present and version-matched at
+  `150.0.7871.115`.
+  `just install-chrome-driver` obtains it from Chrome for Testing for the
+  installed Chrome version; strict Chrome recipes run that bootstrap before
+  starting WebDriver.
+- [x] `just test-consumer-battery` passes the public consumer battery in both
+  installed desktop browser engines.
 - [ ] Full PageDB durable suite rerun through `just test-chrome`.
 
 ### Desktop Firefox
 
 - [x] Firefox is installed on this macOS host.
-- [ ] Generic consumer battery executed in Firefox.
+- [x] Generic consumer battery executed in Firefox through
+  `just test-consumer-battery`.
 - [ ] Full PageDB durable suite executed through `just test-firefox`.
+
+### Playwright Chromium
+
+- [x] Container-only Playwright-Core proof executed through
+  `just container-test-consumer-playwright`. It launches the image's system
+  Chromium headlessly and must not download a Playwright-managed browser. Both
+  public OPFS battery tests passed.
+
+### Puppeteer Chromium
+
+- [x] Container-only Puppeteer-Core proof executed through
+  `just container-test-consumer-puppeteer`. It launches the image's system
+  Chromium headlessly with Chromium's sandbox intact and must not download a
+  Puppeteer-managed browser. The locked 80-package tree and image are subject to
+  the repository security scans. Both public OPFS battery tests passed.
+
+### Opera
+
+- [x] Deferred deliberately. Opera is Chromium-derived and is not an
+  independent engine result; the container does not add its third-party package
+  source without an Opera-specific product requirement.
+
+### Desktop Edge
+
+- [x] Microsoft Edge `150.0.4078.65` is installed on this macOS host.
+- [x] `just test-consumer-battery-edge` passed the public OPFS battery in an
+  isolated headless Edge profile. The recipe drives Edge through its local CDP
+  endpoint because the current upstream runner's legacy Edge WebDriver path
+  does not complete.
 
 ### Desktop Safari Or WebKit
 
 - [x] `/usr/bin/safaridriver` is installed.
-- [ ] Remote Safari automation session verified. This may require the explicit
-  `just enable-safari-automation` operator step.
-- [ ] Generic consumer battery executed in Safari.
+- [x] Remote Safari automation session verified with `just check-safari-driver`.
+- [x] Generic consumer battery executed in Safari: both the sync-access-handle
+  round trip and raw-sync baseline passed.
 - [ ] Full PageDB durable suite executed through `just test-safari`.
 
 ### Android Chrome
 
 - [x] Android Debug Bridge is installed.
-- [ ] A device or emulator is attached and booted. The latest local status had
-  no attached devices and no test process.
-- [ ] Generic consumer battery executed on Android Chrome.
+- [x] A local Android emulator is provisioned and can launch Chrome.
+- [x] Generic consumer battery executed on Android Chrome through the
+  emulator-only CDP route. Automated recipes ignore ambient `ANDROID_SERIAL`
+  and accept only `ANDROID_EMULATOR_SERIAL` values beginning with `emulator-`.
+  The route patches only the upstream test-runner's unconditional `SharedWorker`
+  wrapper, resets the test emulator's Chrome profile for a fresh OPFS quota
+  state, and requires the browser-reported success result.
 - [ ] PageDB bounded smoke executed through `just test-android-chrome`.
 - [ ] Full PageDB Android matrix executed through `just test-android-chrome-all`.
 
 ### iPhone Safari
 
-- [ ] An iOS simulator is booted. The latest local status had no booted device.
-- [ ] MobileSafari availability verified with `just check-iphone-safari`.
-- [ ] Generic consumer battery executed in iPhone Safari.
+- [x] An iOS simulator was booted (`iPhone 17 Pro`).
+- [x] MobileSafari availability verified with `just check-iphone-safari`.
+- [x] Generic consumer battery executed in iPhone Safari: both public OPFS
+  tests passed through SafariDriver's iOS simulator capability.
 - [ ] Full PageDB iPhone Safari suite executed through `just test-iphone-safari`.
 
 ### iPhone Chrome
 
-- [ ] An iOS simulator is booted and Chrome for iOS is installed.
+- [x] An iOS simulator is booted.
+- [ ] Chrome for iOS is not installed in the simulator. No simulator-compatible
+  `com.google.chrome` bundle is available locally.
 - [ ] Chrome app-shell launch verified with `just check-iphone-chrome`.
 - [ ] This target is an app-shell check only. Chrome for iOS uses WebKit, so it
   does not create an independent browser-engine durability result.
 
 ### Edge
 
-- [ ] No Edge recipe exists in this repository. It is not currently a supported
-  runner target; add a version-matched EdgeDriver and named recipe before
-  treating Edge as covered.
+- [x] Edge is covered by `just test-consumer-battery-edge`; no EdgeDriver is
+  required for the generic battery.
 
 ## Toolchain And CI
 
@@ -105,8 +146,9 @@ not executed, or blocked by the prerequisite stated beside it.
   `just container-test-consumer-firefox`.
 - [x] Container report generated through `just container-report <path>`.
 - [x] Safari/iPhone are intentionally outside the Linux container scope.
-- [x] Android Chrome is intentionally outside the default container scope;
-  device access and emulator virtualization need their own host-backed run.
+- [x] Android Chrome is intentionally outside the default container scope; the
+  host-backed AVD route needs no attached device, and Docker Desktop on macOS
+  does not provide a reliable nested-virtualization lane.
 
 ## Commands
 
