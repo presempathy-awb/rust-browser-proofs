@@ -68,23 +68,34 @@ The command preserves the current directory. Run `wasm-pack` from the consumer
 package directory; if a consumer repository has a virtual workspace root,
 change into the member containing `[package]` before invoking the recipe.
 
-To capture a Markdown environment snapshot without running a test, add an
-optional report path:
+To capture a Markdown environment snapshot without running a test, request a
+report:
 
 ```sh
-rust-browser-proofs --report /tmp/rust-browser-proofs-environment.md
+rust-browser-proofs --report
 ```
 
-Place `--report <path>` before `-- <command>` to record one command's exit
-result as well. The report distinguishes local prerequisites from test evidence:
+Place `--report` before `-- <command>` to record one command's exit result as
+well. The report distinguishes local prerequisites from test evidence:
 only an explicit successful `wasm-pack` browser flag marks that desktop browser
 passed, and all other browser/device targets remain unexecuted.
+
+Default reports are timestamped files in
+`$RUST_BROWSER_PROOFS_REPORT_DIR` when set, otherwise
+`$XDG_CACHE_HOME/rust-browser-proofs/browser-tests` or
+`$HOME/cache/rust-browser-proofs/browser-tests`. Pass `--report <path>` when a
+CI job or handoff needs a specific artifact location.
+
+The report directory also contains `report-cache.sqlite3`. The native runner
+stores the exact Markdown in one transactionally upserted `report_cache` row per
+report path, with its write time. Run `rust-browser-proofs --mirror-report
+<path>` when an existing Markdown artifact must be added to that local cache.
 
 In the canonical checkout, run `mise trust .mise.toml` first; its checked-in
 `bin/` entrypoint makes the command available without a global installation.
 For a sibling repository, either add that same `bin/` directory to its
 project-local PATH or use the explicit `cargo run --manifest-path` command in
-the checklist. A global `cargo install --path` is optional and must be rerun
+the checklist. A global `cargo install --path crates/rust-browser-proofs --features runner` is optional and must be rerun
 after local runner changes.
 
 ## What Is Reusable Today

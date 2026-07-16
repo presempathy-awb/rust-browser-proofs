@@ -215,7 +215,7 @@ async function run() {
       throw new Error("The test page did not load the expected wasm-bindgen runner script.");
     }
     if (!output.includes("test result: ok.")) {
-      throw new Error("Android browser test reported a failure.");
+      throw new Error("CDP browser test reported a failure.");
     }
   } finally {
     page?.close();

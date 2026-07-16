@@ -13,10 +13,14 @@ trivy_cache_volume := "rust-browser-proofs-trivy-cache"
 default:
     @just --list
 
+# Install the Rustup-owned WebAssembly target without running full setup.
+install-wasm32-unknown-unknown:
+    rustup target add wasm32-unknown-unknown
+
 # One-time setup: tools, wasm target, git hooks
 setup:
     mise install
-    rustup target add wasm32-unknown-unknown
+    just install-wasm32-unknown-unknown
     lefthook install
 
 install-adb:
@@ -237,20 +241,59 @@ install-iphone-safari:
 install-iphone-chrome: install-iphone-safari
     #!/usr/bin/env bash
     set -euo pipefail
-    if xcrun simctl get_app_container booted com.google.chrome >/dev/null 2>&1; then
+    app_path="${IPHONE_CHROME_APP_PATH:-}"
+    bundle_id="${IPHONE_CHROME_BUNDLE_ID:-}"
+    if [[ -n "$app_path" ]]; then
+        if [[ ! -d "$app_path" || ! -f "$app_path/Info.plist" ]]; then
+            echo "IPHONE_CHROME_APP_PATH is not a simulator .app bundle: $app_path" >&2
+            exit 1
+        fi
+        detected_bundle_id="$(plutil -extract CFBundleIdentifier raw -o - "$app_path/Info.plist")"
+        if [[ -n "$bundle_id" && "$bundle_id" != "$detected_bundle_id" ]]; then
+            echo "IPHONE_CHROME_BUNDLE_ID does not match $app_path/Info.plist." >&2
+            exit 1
+        fi
+        bundle_id="$detected_bundle_id"
+    fi
+    if [[ -z "$bundle_id" ]]; then
+        for candidate in com.google.chrome.ios org.chromium.ost.chrome.ios.dev org.chromium.chrome.ios org.chromium.chrome.ios.dev; do
+            if xcrun simctl get_app_container booted "$candidate" >/dev/null 2>&1; then
+                bundle_id="$candidate"
+                break
+            fi
+        done
+    fi
+    if [[ -n "$bundle_id" ]] && xcrun simctl get_app_container booted "$bundle_id" >/dev/null 2>&1; then
         echo "iphone_chrome_simulator=installed"
+        echo "iphone_chrome_bundle_id=$bundle_id"
         exit 0
     fi
-    app_path="${IPHONE_CHROME_APP_PATH:-}"
-    if [[ -z "$app_path" ]]; then
+    if [[ -z "$app_path" || -z "$bundle_id" ]]; then
         echo "Chrome for iOS is not installed in the booted simulator." >&2
-        echo "Set IPHONE_CHROME_APP_PATH to a simulator-compatible Chrome.app, then rerun." >&2
+        echo "Set IPHONE_CHROME_APP_PATH to a simulator-compatible Chrome.app or Chromium.app, then rerun." >&2
         echo "App Store iOS apps are not installable into Simulator as durable test fixtures." >&2
         exit 1
     fi
     xcrun simctl install booted "$app_path"
-    xcrun simctl get_app_container booted com.google.chrome >/dev/null
+    xcrun simctl get_app_container booted "$bundle_id" >/dev/null
     echo "iphone_chrome_simulator=installed"
+    echo "iphone_chrome_bundle_id=$bundle_id"
+
+build-iphone-chromium-source:
+    bash scripts/build-iphone-chromium-source.sh
+
+run-iphone-chromium-source url="about:blank":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    root="${CHROMIUM_IOS_ROOT:-$HOME/.volumes/chromium}"
+    app_path="$root/artifacts/current/Chromium.app"
+    if [[ ! -f "$app_path/Info.plist" ]]; then
+        just build-iphone-chromium-source
+    fi
+    bundle_id="$(plutil -extract CFBundleIdentifier raw -o - "$app_path/Info.plist")"
+    IPHONE_CHROME_APP_PATH="$app_path" just install-iphone-chrome
+    xcrun simctl spawn booted defaults write "$bundle_id" FirstRunForceDisabled -bool true
+    IPHONE_CHROME_APP_PATH="$app_path" just run-iphone-chrome "{{ url }}"
 
 # Browser suites (dedicated-worker OPFS tests). Browsers required locally.
 # .tools/chromedriver (gitignored) must match the installed Chrome major
@@ -390,6 +433,7 @@ check-safari-driver:
         echo "SafariDriver is missing or not executable: $driver" >&2
         exit 1
     fi
+    "{{ justfile_directory() }}/scripts/run-safari-command.sh" 'com.apple.Safari' -- true
     port=$((20000 + RANDOM % 20000))
     log="$(mktemp "${TMPDIR:-/tmp}/pagedb-opfs-safaridriver.XXXXXX")"
     pid=''
@@ -414,7 +458,7 @@ check-safari-driver:
         kill -0 "$pid" 2>/dev/null || break
         sleep 0.1
     done
-    response="$(curl --silent --show-error --max-time 5 -X POST "http://127.0.0.1:$port/session" -H 'Content-Type: application/json' -d '{"capabilities":{"alwaysMatch":{"browserName":"safari"}}}' || true)"
+    response="$("{{ justfile_directory() }}/scripts/run-with-focus-guard.sh" 'com.apple.Safari' -- curl --silent --show-error --max-time 5 -X POST "http://127.0.0.1:$port/session" -H 'Content-Type: application/json' -d '{"capabilities":{"alwaysMatch":{"browserName":"safari"}}}' || true)"
     session="$(printf '%s' "$response" | sed -n 's/.*"sessionId":"\([^"]*\)".*/\1/p')"
     if [[ -n "$session" ]]; then
         exit 0
@@ -429,7 +473,7 @@ check-safari-driver:
     fi
     exit 1
 
-check-android-chrome: boot-android-emulator install-android-chromedriver
+check-android-chrome: boot-android-emulator
     #!/usr/bin/env bash
     set -euo pipefail
     adb start-server >/dev/null
@@ -464,12 +508,25 @@ check-iphone-safari: install-iphone-safari
 check-iphone-chrome: install-iphone-chrome
     #!/usr/bin/env bash
     set -euo pipefail
-    if ! xcrun simctl get_app_container booted com.google.chrome >/dev/null 2>&1; then
-        echo "Chrome for iOS (com.google.chrome) is not installed in the booted simulator." >&2
+    bundle_id="${IPHONE_CHROME_BUNDLE_ID:-}"
+    if [[ -z "$bundle_id" && -n "${IPHONE_CHROME_APP_PATH:-}" ]]; then
+        bundle_id="$(plutil -extract CFBundleIdentifier raw -o - "$IPHONE_CHROME_APP_PATH/Info.plist")"
+    fi
+    if [[ -z "$bundle_id" ]]; then
+        for candidate in com.google.chrome.ios org.chromium.ost.chrome.ios.dev org.chromium.chrome.ios org.chromium.chrome.ios.dev; do
+            if xcrun simctl get_app_container booted "$candidate" >/dev/null 2>&1; then
+                bundle_id="$candidate"
+                break
+            fi
+        done
+    fi
+    if [[ -z "$bundle_id" ]] || ! xcrun simctl get_app_container booted "$bundle_id" >/dev/null 2>&1; then
+        echo "No supported Chrome or Chromium iOS app is installed in the booted simulator." >&2
         echo "Safari/WebKit proof covers the engine class, but not the Chrome iOS app shell." >&2
         exit 1
     fi
     echo "iphone_chrome_simulator=booted"
+    echo "iphone_chrome_bundle_id=$bundle_id"
 
 test-chrome: check-chrome-driver build-driver
     cd harness && mise exec -- sh -c 'toolchain="$(dirname "$(rustup which rustc)")"; export PATH="$toolchain:$PATH" RUSTC="$toolchain/rustc" CARGO="$toolchain/cargo" WASM_BINDGEN_TEST_TIMEOUT=120; wasm-pack test --headless --chrome --chromedriver "{{ justfile_directory() }}/.tools/chromedriver"'
@@ -481,36 +538,61 @@ test-safari: check-safari-driver build-driver
     #!/usr/bin/env bash
     set -euo pipefail
     cd harness
+    focus_guard="{{ justfile_directory() }}/scripts/run-with-focus-guard.sh"
+    toolchain="$(dirname "$(rustup which rustc)")"
+    export PATH="$toolchain:$PATH" RUSTC="$toolchain/rustc" CARGO="$toolchain/cargo"
     for suite in bootstrap conformance engine idb_spike manifest oracle raw_sync_benchmark receipt_browser registry smoke vfs_basic; do
-        toolchain="$(dirname "$(rustup which rustc)")"
-        PATH="$toolchain:$PATH" RUSTC="$toolchain/rustc" CARGO="$toolchain/cargo" WASM_BINDGEN_TEST_TIMEOUT=300 wasm-pack test --headless --safari --safaridriver /usr/bin/safaridriver --test "$suite"
+        WASM_BINDGEN_TEST_TIMEOUT=300 "$focus_guard" 'com.apple.Safari' -- wasm-pack test --headless --safari --safaridriver /usr/bin/safaridriver --test "$suite"
     done
 
-test-android-chrome suite="bootstrap" keep_emulator="0" wall_timeout="120" test_timeout="90":
+test-android-chrome suite="bootstrap" keep_emulator="0" wall_timeout="120" test_timeout="90" features="":
     #!/usr/bin/env bash
     set -euo pipefail
     keep_emulator="{{ keep_emulator }}"
     wall_timeout="{{ wall_timeout }}"
     test_timeout="{{ test_timeout }}"
-    test_pid=''
-    webdriver=''
-    webdriver_created='0'
+    features="${ANDROID_TEST_FEATURES:-{{ features }}}"
     serial=''
     reverse_port=''
+    cdp_port=''
+    runner_pid=''
+    runner_log=''
+    chrome_command_line_backup=''
+    chrome_command_line_existed='0'
+    previous_debug_app=''
+    terminate_process_tree() {
+        local parent="$1"
+        local child=''
+        for child in $(pgrep -P "$parent" 2>/dev/null || true); do
+            terminate_process_tree "$child"
+        done
+        kill "$parent" 2>/dev/null || true
+    }
     cleanup() {
         trap - EXIT INT TERM
+        if [[ -n "$runner_pid" ]] && kill -0 "$runner_pid" 2>/dev/null; then
+            terminate_process_tree "$runner_pid"
+            wait "$runner_pid" 2>/dev/null || true
+        fi
         if [[ -n "$serial" && -n "$reverse_port" ]]; then
             adb -s "$serial" reverse --remove "tcp:$reverse_port" >/dev/null 2>&1 || true
         fi
-        if [[ "$webdriver_created" == "1" && -n "$webdriver" ]]; then
-            rm -f "$webdriver"
+        if [[ -n "$serial" && -n "$cdp_port" ]]; then
+            adb -s "$serial" forward --remove "tcp:$cdp_port" >/dev/null 2>&1 || true
+            adb -s "$serial" shell am force-stop com.android.chrome >/dev/null 2>&1 || true
+            if [[ "$chrome_command_line_existed" == '1' ]]; then
+                adb -s "$serial" shell 'cat > /data/local/tmp/chrome-command-line' <"$chrome_command_line_backup" >/dev/null 2>&1 || true
+            else
+                adb -s "$serial" shell rm -f /data/local/tmp/chrome-command-line >/dev/null 2>&1 || true
+            fi
+            if [[ -n "$previous_debug_app" && "$previous_debug_app" != 'null' ]]; then
+                adb -s "$serial" shell am set-debug-app --persistent "$previous_debug_app" >/dev/null 2>&1 || true
+            else
+                adb -s "$serial" shell am clear-debug-app >/dev/null 2>&1 || true
+            fi
         fi
-        if [[ -n "$test_pid" ]] && kill -0 "$test_pid" 2>/dev/null; then
-            kill "$test_pid" 2>/dev/null || true
-            sleep 2
-            kill -KILL "$test_pid" 2>/dev/null || true
-            wait "$test_pid" 2>/dev/null || true
-        fi
+        [[ -z "$runner_log" ]] || rm -f "$runner_log"
+        [[ -z "$chrome_command_line_backup" ]] || rm -f "$chrome_command_line_backup"
         if [[ "$keep_emulator" != "1" ]]; then
             (cd "{{ justfile_directory() }}" && just stop-android-emulator) >/dev/null 2>&1 || true
         fi
@@ -521,71 +603,88 @@ test-android-chrome suite="bootstrap" keep_emulator="0" wall_timeout="120" test_
     toolchain="$(dirname "$(rustup which rustc)")"
     export PATH="$toolchain:$PATH" RUSTC="$toolchain/rustc" CARGO="$toolchain/cargo"
     just check-android-chrome
-    package_dir="${ANDROID_TEST_PACKAGE_DIR:-harness}"
-    if [[ "$package_dir" != "harness" && "$package_dir" != "fixtures/consumer-battery" ]]; then
-        echo "ANDROID_TEST_PACKAGE_DIR must be harness or fixtures/consumer-battery." >&2
-        exit 1
-    fi
-    webdriver="{{ justfile_directory() }}/$package_dir/webdriver.json"
-    if [[ "$package_dir" == "harness" ]]; then
-        just build-driver
-    fi
-    cd "$package_dir"
-    if [[ -e webdriver.json ]]; then
-        echo "Refusing to overwrite $package_dir/webdriver.json; move it aside before running Android Chrome." >&2
-        exit 1
-    fi
-    webdriver_created='1'
-    serial_part=''
-    if [[ -n "${ANDROID_EMULATOR_SERIAL:-}" ]]; then
-        serial_part=', "androidDeviceSerial": "'"$ANDROID_EMULATOR_SERIAL"'"'
-    fi
-    printf '{ "goog:chromeOptions": { "androidPackage": "com.android.chrome"%s } }\n' "$serial_part" > webdriver.json
     serial="${ANDROID_EMULATOR_SERIAL:-}"
     if [[ -z "$serial" ]]; then
         serial="$(adb devices | awk 'NR > 1 && $1 ~ /^emulator-/ && $2 == "device" { print $1; exit }')"
     fi
-    reverse_port="${ANDROID_WASM_BINDGEN_TEST_PORT:-8000}"
-    if ! [[ "$reverse_port" =~ ^[0-9]+$ ]] || (( reverse_port < 1 || reverse_port > 65535 )); then
-        echo "ANDROID_WASM_BINDGEN_TEST_PORT must be an integer from 1 through 65535." >&2
+    reverse_port="${ANDROID_WASM_BINDGEN_TEST_PORT:-$((20000 + RANDOM % 20000))}"
+    cdp_port="${ANDROID_CHROME_CDP_PORT:-9222}"
+    for port in "$reverse_port" "$cdp_port"; do
+        if ! [[ "$port" =~ ^[0-9]+$ ]] || (( port < 1 || port > 65535 )); then
+            echo 'ANDROID_WASM_BINDGEN_TEST_PORT and ANDROID_CHROME_CDP_PORT must be ports from 1 through 65535.' >&2
+            exit 1
+        fi
+    done
+    if [[ "$reverse_port" == "$cdp_port" ]]; then
+        echo 'ANDROID_WASM_BINDGEN_TEST_PORT and ANDROID_CHROME_CDP_PORT must differ.' >&2
         exit 1
     fi
-    adb -s "$serial" reverse "tcp:$reverse_port" "tcp:$reverse_port"
-    browser_major="$(adb -s "$serial" shell dumpsys package com.android.chrome | sed -n 's/.*versionName=\([^ ]*\).*/\1/p' | head -1 | cut -d. -f1 | tr -d '\r')"
-    driver="${ANDROID_CHROMEDRIVER:-{{ justfile_directory() }}/.tools/chromedriver-android-$browser_major}"
     suite="${ANDROID_TEST_SUITE:-{{ suite }}}"
-    cmd=(wasm-pack test --headless --chrome --chromedriver "$driver")
-    if [[ "$suite" != "all" ]]; then
-        cmd+=(--test "$suite")
+    if [[ "$suite" == "all" ]]; then
+        echo 'test-android-chrome runs one named suite; use test-android-chrome-all for the full matrix.' >&2
+        exit 1
     fi
     echo "android_chrome_suite=$suite"
+    echo "android_chrome_features=${features:-none}"
     echo "android_wall_timeout_seconds=$wall_timeout"
-    (
-        export WASM_BINDGEN_TEST_TIMEOUT="$test_timeout"
-        export WASM_BINDGEN_TEST_ADDRESS="127.0.0.1:$reverse_port"
-        nice -n "${ANDROID_TEST_NICE:-15}" "${cmd[@]}"
-    ) &
-    test_pid=$!
+    just build-driver
+    chrome_command_line_backup="$(mktemp "${TMPDIR:-/tmp}/rust-browser-proofs-pagedb-chrome-command-line.XXXXXX")"
+    if adb -s "$serial" shell test -e /data/local/tmp/chrome-command-line; then
+        adb -s "$serial" exec-out cat /data/local/tmp/chrome-command-line >"$chrome_command_line_backup"
+        chrome_command_line_existed='1'
+    fi
+    adb -s "$serial" shell pm clear com.android.chrome >/dev/null
+    previous_debug_app="$(adb -s "$serial" shell settings get global debug_app | tr -d '\r')"
+    adb -s "$serial" shell am set-debug-app --persistent com.android.chrome
+    printf 'chrome --remote-debugging-port=%s --disable-fre --no-first-run --disable-popup-blocking\n' "$cdp_port" | adb -s "$serial" shell 'cat > /data/local/tmp/chrome-command-line'
+    adb -s "$serial" shell chmod 755 /data/local/tmp/chrome-command-line
+    adb -s "$serial" shell am start -W -n com.android.chrome/com.google.android.apps.chrome.Main -a android.intent.action.VIEW -d about:blank >/dev/null
+    adb -s "$serial" forward --remove "tcp:$cdp_port" >/dev/null 2>&1 || true
+    adb -s "$serial" forward "tcp:$cdp_port" localabstract:chrome_devtools_remote
     for _ in $(seq 1 "$wall_timeout"); do
-        if ! kill -0 "$test_pid" 2>/dev/null; then
-            set +e
-            wait "$test_pid"
-            status=$?
-            set -e
-            test_pid=''
-            exit "$status"
+        if curl --fail --silent --max-time 1 "http://127.0.0.1:$cdp_port/json/version" >/dev/null 2>&1; then
+            break
         fi
         sleep 1
     done
-    echo "Android Chrome wasm run timed out after ${wall_timeout}s; cleaning up emulator/WebDriver state." >&2
-    kill "$test_pid" 2>/dev/null || true
-    sleep 2
-    kill -KILL "$test_pid" 2>/dev/null || true
-    set +e
-    wait "$test_pid"
-    set -e
-    test_pid=''
-    exit 124
+    if ! curl --fail --silent --max-time 1 "http://127.0.0.1:$cdp_port/json/version" >/dev/null 2>&1; then
+        echo 'Android Chrome did not expose its DevTools endpoint.' >&2
+        exit 1
+    fi
+    runner_log="$(mktemp "${TMPDIR:-/tmp}/rust-browser-proofs-pagedb-android-runner.XXXXXX")"
+    (
+        cd harness
+        if [[ -n "$features" ]]; then
+            NO_HEADLESS=1 WASM_BINDGEN_TEST_ADDRESS="127.0.0.1:$reverse_port" \
+                WASM_BINDGEN_TEST_TIMEOUT="$test_timeout" \
+                nice -n "${ANDROID_TEST_NICE:-15}" wasm-pack test --headless --chrome --test "$suite" --features "$features"
+        else
+            NO_HEADLESS=1 WASM_BINDGEN_TEST_ADDRESS="127.0.0.1:$reverse_port" \
+                WASM_BINDGEN_TEST_TIMEOUT="$test_timeout" \
+                nice -n "${ANDROID_TEST_NICE:-15}" wasm-pack test --headless --chrome --test "$suite"
+        fi
+    ) >"$runner_log" 2>&1 &
+    runner_pid=$!
+    for _ in $(seq 1 "$wall_timeout"); do
+        if curl --fail --silent --max-time 1 "http://127.0.0.1:$reverse_port/" >/dev/null 2>&1; then
+            break
+        fi
+        if ! kill -0 "$runner_pid" 2>/dev/null; then
+            cat "$runner_log" >&2
+            exit 1
+        fi
+        sleep 1
+    done
+    if ! curl --fail --silent --max-time 1 "http://127.0.0.1:$reverse_port/" >/dev/null 2>&1; then
+        echo "The wasm-bindgen interactive server did not become ready after ${wall_timeout}s." >&2
+        cat "$runner_log" >&2
+        exit 1
+    fi
+    adb -s "$serial" reverse "tcp:$reverse_port" "tcp:$reverse_port"
+    node "{{ justfile_directory() }}/scripts/cdp-browser-test.mjs" \
+        --cdp-url "http://127.0.0.1:$cdp_port" \
+        --url "http://127.0.0.1:$reverse_port/" \
+        --timeout-seconds "$test_timeout"
 
 test-android-chrome-all wall_timeout="120" test_timeout="90":
     #!/usr/bin/env bash
@@ -596,6 +695,16 @@ test-android-chrome-all wall_timeout="120" test_timeout="90":
         just test-android-chrome "$suite" 1 "{{ wall_timeout }}" "{{ test_timeout }}"
     done
 
+test-idb-android-chrome wall_timeout="120" test_timeout="90": build-idb-driver
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cleanup() { (cd "{{ justfile_directory() }}" && just stop-android-emulator) >/dev/null 2>&1 || true; }
+    trap cleanup EXIT
+    just test-android-chrome idb_spike 1 "{{ wall_timeout }}" "{{ test_timeout }}"
+    for suite in idb_store idb_vfs idb_crash idb_receipt idb_cross_worker idb_cross_tab; do
+        just test-android-chrome "$suite" 1 "{{ wall_timeout }}" "{{ test_timeout }}" idb-vendor-spike
+    done
+
 test-android-chrome-smoke:
     just test-android-chrome bootstrap
 
@@ -603,6 +712,7 @@ test-iphone-safari: check-safari-driver check-iphone-safari build-driver
     #!/usr/bin/env bash
     set -euo pipefail
     cd harness
+    focus_guard="{{ justfile_directory() }}/scripts/run-with-focus-guard.sh"
     if [[ -e webdriver.json ]]; then
         echo "Refusing to overwrite harness/webdriver.json; move it aside before running iPhone Safari." >&2
         exit 1
@@ -610,10 +720,45 @@ test-iphone-safari: check-safari-driver check-iphone-safari build-driver
     cleanup() { rm -f webdriver.json; }
     trap cleanup EXIT
     printf '{ "browserName": "safari", "platformName": "ios", "safari:useSimulator": true }\n' > webdriver.json
+    toolchain="$(dirname "$(rustup which rustc)")"
+    export PATH="$toolchain:$PATH" RUSTC="$toolchain/rustc" CARGO="$toolchain/cargo"
     for suite in bootstrap conformance engine idb_spike manifest oracle raw_sync_benchmark receipt_browser registry smoke vfs_basic; do
-        toolchain="$(dirname "$(rustup which rustc)")"
-        PATH="$toolchain:$PATH" RUSTC="$toolchain/rustc" CARGO="$toolchain/cargo" WASM_BINDGEN_TEST_TIMEOUT=300 wasm-pack test --headless --safari --safaridriver /usr/bin/safaridriver --test "$suite"
+        WASM_BINDGEN_TEST_TIMEOUT=300 "$focus_guard" 'com.apple.Safari,com.apple.iphonesimulator' -- wasm-pack test --headless --safari --safaridriver /usr/bin/safaridriver --test "$suite"
     done
+
+_test-idb-safari simulator="0":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd harness
+    focus_guard="{{ justfile_directory() }}/scripts/run-with-focus-guard.sh"
+    safari_runner="{{ justfile_directory() }}/scripts/run-safari-command.sh"
+    focus_bundles='com.apple.Safari'
+    if [[ -e webdriver.json ]]; then
+        echo 'Refusing to overwrite harness/webdriver.json; move it aside before running Safari IDB tests.' >&2
+        exit 1
+    fi
+    if [[ "{{ simulator }}" == '1' ]]; then
+        printf '{ "browserName": "safari", "platformName": "ios", "safari:useSimulator": true }\n' > webdriver.json
+        focus_bundles+=',com.apple.iphonesimulator'
+    fi
+    cleanup() { rm -f webdriver.json; }
+    trap cleanup EXIT
+    toolchain="$(dirname "$(rustup which rustc)")"
+    export PATH="$toolchain:$PATH" RUSTC="$toolchain/rustc" CARGO="$toolchain/cargo"
+    WASM_BINDGEN_TEST_TIMEOUT=300 "$focus_guard" "$focus_bundles" -- wasm-pack test --headless --safari --safaridriver /usr/bin/safaridriver --test idb_spike
+    for suite in idb_store idb_vfs; do
+        WASM_BINDGEN_TEST_TIMEOUT=300 "$focus_guard" "$focus_bundles" -- wasm-pack test --headless --safari --safaridriver /usr/bin/safaridriver --test "$suite" --features idb-vendor-spike
+    done
+    WASM_BINDGEN_TEST_TIMEOUT=90 "$safari_runner" "$focus_bundles" -- wasm-pack test --headless --safari --safaridriver /usr/bin/safaridriver --test idb_crash --features idb-vendor-spike,idb-crash-browser-parent
+    for suite in idb_receipt idb_cross_worker idb_cross_tab; do
+        WASM_BINDGEN_TEST_TIMEOUT=300 "$focus_guard" "$focus_bundles" -- wasm-pack test --headless --safari --safaridriver /usr/bin/safaridriver --test "$suite" --features idb-vendor-spike
+    done
+
+test-idb-safari: check-safari-driver build-idb-driver
+    just _test-idb-safari
+
+test-idb-iphone-safari: check-safari-driver check-iphone-safari build-idb-driver
+    just _test-idb-safari 1
 
 run-android-chrome url="about:blank": check-android-chrome
     #!/usr/bin/env bash
@@ -630,13 +775,70 @@ run-iphone-safari url="about:blank": check-iphone-safari
 run-iphone-chrome url="about:blank": check-iphone-chrome
     #!/usr/bin/env bash
     set -euo pipefail
+    bundle_id="${IPHONE_CHROME_BUNDLE_ID:-}"
+    if [[ -z "$bundle_id" && -n "${IPHONE_CHROME_APP_PATH:-}" ]]; then
+        bundle_id="$(plutil -extract CFBundleIdentifier raw -o - "$IPHONE_CHROME_APP_PATH/Info.plist")"
+    fi
+    if [[ -z "$bundle_id" ]]; then
+        for candidate in com.google.chrome.ios org.chromium.ost.chrome.ios.dev org.chromium.chrome.ios org.chromium.chrome.ios.dev; do
+            if xcrun simctl get_app_container booted "$candidate" >/dev/null 2>&1; then
+                bundle_id="$candidate"
+                break
+            fi
+        done
+    fi
+    if [[ -z "$bundle_id" ]]; then
+        echo 'Could not determine the installed iPhone Chrome or Chromium bundle identifier.' >&2
+        exit 1
+    fi
+    stability_seconds="${IPHONE_CHROME_STABILITY_SECONDS:-15}"
+    if ! [[ "$stability_seconds" =~ ^[1-9][0-9]*$ ]]; then
+        echo 'IPHONE_CHROME_STABILITY_SECONDS must be a positive integer.' >&2
+        exit 1
+    fi
+    crash_reports_before="$(/usr/bin/find "$HOME/Library/Logs/DiagnosticReports" -maxdepth 1 -type f -name 'Chromium*.ips' 2>/dev/null | wc -l | tr -d ' ')"
+    wait_for_survival() {
+        local crash_reports_after
+        sleep "$stability_seconds"
+        if ! xcrun simctl spawn booted launchctl list 2>/dev/null | grep -F "UIKitApplication:$bundle_id" >/dev/null; then
+            echo "iPhone browser process was not alive after the ${stability_seconds}s stability window." >&2
+            exit 1
+        fi
+        crash_reports_after="$(/usr/bin/find "$HOME/Library/Logs/DiagnosticReports" -maxdepth 1 -type f -name 'Chromium*.ips' 2>/dev/null | wc -l | tr -d ' ')"
+        if [[ "$crash_reports_after" != "$crash_reports_before" ]]; then
+            echo 'A new Chromium crash report appeared during the stability window.' >&2
+            exit 1
+        fi
+        echo "iphone_chrome_survived_seconds=$stability_seconds"
+    }
     raw="{{ url }}"
+    launch_args=()
+    if [[ "$bundle_id" == org.chromium.* ]]; then
+        launch_args+=(--disable-features=BuildExternalPrivacyContext)
+    fi
+    xcrun simctl terminate booted "$bundle_id" >/dev/null 2>&1 || true
+    xcrun simctl launch booted "$bundle_id" "${launch_args[@]}" >/dev/null
+    if [[ "$raw" == 'about:blank' ]]; then
+        wait_for_survival
+        echo "iphone_chrome_launched=$bundle_id"
+        exit 0
+    fi
+    scheme="${IPHONE_CHROME_URL_SCHEME:-}"
+    if [[ -z "$scheme" ]]; then
+        if [[ "$bundle_id" == com.google.chrome.ios* ]]; then
+            scheme='googlechrome'
+        else
+            scheme='chromium'
+        fi
+    fi
     case "$raw" in
-        https://*) chrome_url="googlechromes://${raw#https://}" ;;
-        http://*) chrome_url="googlechrome://${raw#http://}" ;;
+        https://*) chrome_url="${scheme}s://${raw#https://}" ;;
+        http://*) chrome_url="${scheme}://${raw#http://}" ;;
         *) chrome_url="$raw" ;;
     esac
     xcrun simctl openurl booted "$chrome_url"
+    wait_for_survival
+    echo "iphone_chrome_opened=$chrome_url"
 
 # Local-only PageDB IDB fallback proof. Requires the gitignored Cargo patch
 # to the `codex/idb-vfs-fallback` vendor branch; it is intentionally not CI.
@@ -662,21 +864,31 @@ test-browsers: test-chrome test-firefox
 
 test-browsers-all: test-chrome test-firefox test-safari
 
+# Self-hosted generic proof: this runs the crate's own wasm integration test,
+# which invokes the public macro from within the crate package.
+test-self-chrome: check-chrome-driver
+    cd crates/rust-browser-proofs && cargo run --features runner -- --report -- wasm-pack test --headless --chrome --chromedriver "{{ justfile_directory() }}/.tools/chromedriver"
+
+test-self-firefox:
+    cd crates/rust-browser-proofs && cargo run --features runner -- --report -- wasm-pack test --headless --firefox
+
+test-self: test-self-chrome test-self-firefox
+
 # Consumer compile proof: this fixture only depends on the generic test crate
 # and emits its own test battery through the public macro.
 check-consumer-battery:
-    cargo run -p rust-browser-proofs -- -- cargo check -p rust-browser-proofs-consumer-fixture --target wasm32-unknown-unknown --tests
+    cargo run -p rust-browser-proofs --features runner -- -- cargo check -p rust-browser-proofs-consumer-fixture --target wasm32-unknown-unknown --tests
 
 test-consumer-battery-chrome: check-chrome-driver
-    cd fixtures/consumer-battery && cargo run --manifest-path ../../crates/rust-browser-proofs/Cargo.toml -- -- wasm-pack test --headless --chrome --chromedriver "{{ justfile_directory() }}/.tools/chromedriver"
+    cd fixtures/consumer-battery && cargo run --manifest-path ../../crates/rust-browser-proofs/Cargo.toml --features runner -- --report -- wasm-pack test --headless --chrome --chromedriver "{{ justfile_directory() }}/.tools/chromedriver"
 
 test-consumer-battery-firefox:
-    cd fixtures/consumer-battery && cargo run --manifest-path ../../crates/rust-browser-proofs/Cargo.toml -- -- wasm-pack test --headless --firefox
+    cd fixtures/consumer-battery && cargo run --manifest-path ../../crates/rust-browser-proofs/Cargo.toml --features runner -- --report -- wasm-pack test --headless --firefox
 
 test-consumer-battery: test-consumer-battery-chrome test-consumer-battery-firefox
 
 test-consumer-battery-safari: check-safari-driver
-    cd fixtures/consumer-battery && cargo run --manifest-path ../../crates/rust-browser-proofs/Cargo.toml -- -- wasm-pack test --headless --safari --safaridriver /usr/bin/safaridriver --test opfs_battery
+    cd fixtures/consumer-battery && cargo run --manifest-path ../../crates/rust-browser-proofs/Cargo.toml --features runner -- --report -- wasm-pack test --headless --safari --safaridriver /usr/bin/safaridriver --test opfs_battery
 
 test-consumer-battery-iphone-safari: check-safari-driver check-iphone-safari
     #!/usr/bin/env bash
@@ -689,7 +901,7 @@ test-consumer-battery-iphone-safari: check-safari-driver check-iphone-safari
     cleanup() { rm -f webdriver.json; }
     trap cleanup EXIT
     printf '{ "browserName": "safari", "platformName": "ios", "safari:useSimulator": true }\n' > webdriver.json
-    cargo run --manifest-path ../../crates/rust-browser-proofs/Cargo.toml -- -- wasm-pack test --headless --safari --safaridriver /usr/bin/safaridriver --test opfs_battery
+    cargo run --manifest-path ../../crates/rust-browser-proofs/Cargo.toml --features runner -- --report -- wasm-pack test --headless --safari --safaridriver /usr/bin/safaridriver --test opfs_battery
 
 test-consumer-battery-android-chrome keep_emulator="0" wall_timeout="120" test_timeout="90":
     #!/usr/bin/env bash
@@ -704,10 +916,19 @@ test-consumer-battery-android-chrome keep_emulator="0" wall_timeout="120" test_t
     cdp_port=''
     chrome_command_line_backup=''
     chrome_command_line_existed='0'
+    previous_debug_app=''
+    terminate_process_tree() {
+        local parent="$1"
+        local child=''
+        for child in $(pgrep -P "$parent" 2>/dev/null || true); do
+            terminate_process_tree "$child"
+        done
+        kill "$parent" 2>/dev/null || true
+    }
     cleanup() {
         trap - EXIT INT TERM
         if [[ -n "$runner_pid" ]] && kill -0 "$runner_pid" 2>/dev/null; then
-            kill "$runner_pid" 2>/dev/null || true
+            terminate_process_tree "$runner_pid"
             wait "$runner_pid" 2>/dev/null || true
         fi
         if [[ -n "$serial" && -n "$reverse_port" ]]; then
@@ -720,6 +941,11 @@ test-consumer-battery-android-chrome keep_emulator="0" wall_timeout="120" test_t
                 adb -s "$serial" shell 'cat > /data/local/tmp/chrome-command-line' <"$chrome_command_line_backup" >/dev/null 2>&1 || true
             else
                 adb -s "$serial" shell rm -f /data/local/tmp/chrome-command-line >/dev/null 2>&1 || true
+            fi
+            if [[ -n "$previous_debug_app" && "$previous_debug_app" != 'null' ]]; then
+                adb -s "$serial" shell am set-debug-app --persistent "$previous_debug_app" >/dev/null 2>&1 || true
+            else
+                adb -s "$serial" shell am clear-debug-app >/dev/null 2>&1 || true
             fi
         fi
         [[ -z "$runner_log" ]] || rm -f "$runner_log"
@@ -745,7 +971,7 @@ test-consumer-battery-android-chrome keep_emulator="0" wall_timeout="120" test_t
         echo 'The generic Android battery is emulator-only and will not alter a physical device.' >&2
         exit 1
     fi
-    reverse_port="${ANDROID_WASM_BINDGEN_TEST_PORT:-8000}"
+    reverse_port="${ANDROID_WASM_BINDGEN_TEST_PORT:-$((20000 + RANDOM % 20000))}"
     cdp_port="${ANDROID_CHROME_CDP_PORT:-9222}"
     for port in "$reverse_port" "$cdp_port"; do
         if ! [[ "$port" =~ ^[0-9]+$ ]] || (( port < 1 || port > 65535 )); then
@@ -753,12 +979,18 @@ test-consumer-battery-android-chrome keep_emulator="0" wall_timeout="120" test_t
             exit 1
         fi
     done
+    if [[ "$reverse_port" == "$cdp_port" ]]; then
+        echo 'ANDROID_WASM_BINDGEN_TEST_PORT and ANDROID_CHROME_CDP_PORT must differ.' >&2
+        exit 1
+    fi
     chrome_command_line_backup="$(mktemp "${TMPDIR:-/tmp}/rust-browser-proofs-chrome-command-line.XXXXXX")"
     if adb -s "$serial" shell test -e /data/local/tmp/chrome-command-line; then
         adb -s "$serial" exec-out cat /data/local/tmp/chrome-command-line >"$chrome_command_line_backup"
         chrome_command_line_existed='1'
     fi
     adb -s "$serial" shell pm clear com.android.chrome >/dev/null
+    previous_debug_app="$(adb -s "$serial" shell settings get global debug_app | tr -d '\r')"
+    adb -s "$serial" shell am set-debug-app --persistent com.android.chrome
     printf 'chrome --remote-debugging-port=%s --disable-fre --no-first-run\n' "$cdp_port" | adb -s "$serial" shell 'cat > /data/local/tmp/chrome-command-line'
     adb -s "$serial" shell chmod 755 /data/local/tmp/chrome-command-line
     adb -s "$serial" shell am start -W -n com.android.chrome/com.google.android.apps.chrome.Main -a android.intent.action.VIEW -d about:blank >/dev/null
@@ -780,7 +1012,7 @@ test-consumer-battery-android-chrome keep_emulator="0" wall_timeout="120" test_t
         cd "{{ justfile_directory() }}/fixtures/consumer-battery"
         PATH="$toolchain:$PATH" RUSTC="$toolchain/rustc" CARGO="$toolchain/cargo" \
             NO_HEADLESS=1 WASM_BINDGEN_TEST_ADDRESS="127.0.0.1:$reverse_port" \
-            cargo run --manifest-path ../../crates/rust-browser-proofs/Cargo.toml -- \
+            cargo run --manifest-path ../../crates/rust-browser-proofs/Cargo.toml --features runner -- \
             wasm-pack test --headless --chrome --test opfs_battery
     ) >"$runner_log" 2>&1 &
     runner_pid=$!
@@ -859,7 +1091,7 @@ test-consumer-battery-edge wall_timeout="120" test_timeout="90":
         cd "{{ justfile_directory() }}/fixtures/consumer-battery"
         PATH="$toolchain:$PATH" RUSTC="$toolchain/rustc" CARGO="$toolchain/cargo" \
             NO_HEADLESS=1 WASM_BINDGEN_TEST_ADDRESS="127.0.0.1:$test_port" \
-            cargo run --manifest-path ../../crates/rust-browser-proofs/Cargo.toml -- \
+            cargo run --manifest-path ../../crates/rust-browser-proofs/Cargo.toml --features runner -- \
             wasm-pack test --headless --chrome --test opfs_battery
     ) >"$runner_log" 2>&1 &
     runner_pid=$!
@@ -907,27 +1139,65 @@ test-consumer-battery-edge wall_timeout="120" test_timeout="90":
         exit "$status"
     fi
 
+test-edge: build-driver
+    #!/usr/bin/env bash
+    set -euo pipefail
+    edge="${EDGE_BINARY:-/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge}"
+    for suite in bootstrap conformance engine idb_spike manifest oracle raw_sync_benchmark receipt_browser registry smoke vfs_basic; do
+        bash "{{ justfile_directory() }}/scripts/run-cdp-wasm-pack-test.sh" \
+            "$edge" "{{ justfile_directory() }}/harness" "$suite"
+    done
+
+test-idb-edge: build-idb-driver
+    #!/usr/bin/env bash
+    set -euo pipefail
+    edge="${EDGE_BINARY:-/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge}"
+    runner="{{ justfile_directory() }}/scripts/run-cdp-wasm-pack-test.sh"
+    bash "$runner" "$edge" "{{ justfile_directory() }}/harness" idb_spike
+    for suite in idb_store idb_vfs idb_crash idb_receipt idb_cross_worker idb_cross_tab; do
+        bash "$runner" "$edge" "{{ justfile_directory() }}/harness" "$suite" idb-vendor-spike
+    done
+
 test-consumer-battery-webkit: test-consumer-battery-safari test-consumer-battery-iphone-safari
 
 test-consumer-battery-all: test-consumer-battery test-consumer-battery-edge test-consumer-battery-webkit test-consumer-battery-android-chrome
 
 check-command-runner:
-    cargo run -p rust-browser-proofs -- -- /usr/bin/env true
+    cargo run -p rust-browser-proofs --features runner -- -- /usr/bin/env true
 
-report-environment report_path="/tmp/rust-browser-proofs-environment.md":
-    cargo run -p rust-browser-proofs -- --report "{{ report_path }}"
+check-android-recipe-contract:
+    bash scripts/check-android-recipe-contract.sh
+
+check-iphone-chrome-recipe-contract:
+    bash scripts/check-iphone-chrome-recipe-contract.sh
+
+check-matrix-recipe-contract:
+    bash scripts/check-matrix-recipe-contract.sh
+
+check-host-platform-contract:
+    bash scripts/check-host-platform-contract.sh
+
+report-environment report_path="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    report_path="{{ report_path }}"
+    if [[ -n "$report_path" ]]; then
+        cargo run -p rust-browser-proofs --features runner -- --report "$report_path"
+    else
+        cargo run -p rust-browser-proofs --features runner -- --report
+    fi
 
 container-build:
     docker build --tag "{{ container_image }}" --file Dockerfile .
 
 container-check: container-build
-    docker run --rm "{{ container_image }}" bash -c 'cd "$RUST_BROWSER_PROOFS_WORKSPACE" && cargo test --workspace && cargo check -p rust-browser-proofs-consumer-fixture --target wasm32-unknown-unknown --tests'
+    bash scripts/run-browser-container.sh "{{ container_image }}" -- bash -c 'cd "$RUST_BROWSER_PROOFS_WORKSPACE" && cargo test --workspace && cargo test -p rust-browser-proofs --features runner --bin rust-browser-proofs && cargo check -p rust-browser-proofs-consumer-fixture --target wasm32-unknown-unknown --tests'
 
 container-test-consumer-chrome: container-build
-    docker run --rm --shm-size=1g "{{ container_image }}" bash -c 'cd "$RUST_BROWSER_PROOFS_WORKSPACE/fixtures/consumer-battery" && rust-browser-proofs -- wasm-pack test --headless --chrome --chromedriver /usr/bin/chromedriver --test opfs_battery'
+    bash scripts/run-browser-container.sh "{{ container_image }}" --shm-size=1g -- bash -c 'cd "$RUST_BROWSER_PROOFS_WORKSPACE/fixtures/consumer-battery" && rust-browser-proofs -- wasm-pack test --headless --chrome --chromedriver /usr/bin/chromedriver --test opfs_battery'
 
 container-test-consumer-firefox: container-build
-    docker run --rm --shm-size=1g "{{ container_image }}" bash -c 'cd "$RUST_BROWSER_PROOFS_WORKSPACE/fixtures/consumer-battery" && rust-browser-proofs -- wasm-pack test --headless --firefox --test opfs_battery'
+    bash scripts/run-browser-container.sh "{{ container_image }}" --shm-size=1g -- bash -c 'cd "$RUST_BROWSER_PROOFS_WORKSPACE/fixtures/consumer-battery" && rust-browser-proofs -- wasm-pack test --headless --firefox --test opfs_battery'
 
 container-test-consumer-playwright: container-build
     docker run --rm --shm-size=1g "{{ container_image }}" bash /opt/rust-browser-proofs/playwright/run-opfs-battery.sh
@@ -937,16 +1207,22 @@ container-test-consumer-puppeteer: container-build
 
 container-test-consumer-desktop: container-test-consumer-chrome container-test-consumer-firefox container-test-consumer-playwright container-test-consumer-puppeteer
 
-container-report report_path="/tmp/rust-browser-proofs-container-environment.md": container-build
+container-report report_path="": container-build
     #!/usr/bin/env bash
     set -euo pipefail
+    report_path="{{ report_path }}"
+    if [[ -z "$report_path" ]]; then
+        cache_root="${RUST_BROWSER_PROOFS_REPORT_DIR:-${XDG_CACHE_HOME:-$HOME/cache}/rust-browser-proofs/browser-tests}"
+        report_path="$cache_root/$(date -u +%s)-container-test-status.md"
+    fi
     name="rust-browser-proofs-report-$$"
     trap 'docker rm -f "$name" >/dev/null 2>&1 || true' EXIT
     docker create --name "$name" "{{ container_image }}" bash -c 'rust-browser-proofs --report /tmp/environment.md' >/dev/null
     docker start -a "$name"
-    mkdir -p "$(dirname "{{ report_path }}")"
-    docker cp "$name:/tmp/environment.md" "{{ report_path }}"
-    echo "rust-browser-proofs: copied container report to {{ report_path }}"
+    mkdir -p "$(dirname "$report_path")"
+    docker cp "$name:/tmp/environment.md" "$report_path"
+    cargo run -p rust-browser-proofs --features runner -- --mirror-report "$report_path"
+    echo "rust-browser-proofs: copied container report and mirrored it to SQLite at $report_path"
 
 # Scan the source tree without giving the scanner write access to this checkout
 # or access to the Docker socket. The cache volume holds only Trivy databases.
@@ -969,14 +1245,16 @@ security: security-source security-image
 
 # Native integrity gate used by Mise and the pre-push hook. Browser execution is
 # intentionally a separate, explicit proof because it needs real browser drivers.
-verify: fmt-check lint test-native wasm-check check-command-runner security-source
+verify: fmt-check lint test-native wasm-check check-command-runner check-android-recipe-contract check-iphone-chrome-recipe-contract check-matrix-recipe-contract check-host-platform-contract security-source
 
 # Container integrity gate used by Mise and the pre-push hook.
 container-verify: container-check security-image
 
 # Native-side tests (manifest codec, receipt reference, etc.)
 test-native:
-    cargo test --workspace
+    cargo test -p pagedb-opfs-harness --lib
+    cargo test -p pagedb-opfs-harness --test readme_matrix
+    cargo test -p rust-browser-proofs --features runner --bin rust-browser-proofs
 
 fmt:
     cargo fmt --all
@@ -985,7 +1263,7 @@ fmt-check:
     cargo fmt --all -- --check
 
 lint:
-    cargo clippy --workspace --all-targets -- -D warnings
+    cargo clippy --workspace --all-targets --all-features -- -D warnings
 
 # Compile-check the harness for wasm32 without running browsers
 wasm-check:

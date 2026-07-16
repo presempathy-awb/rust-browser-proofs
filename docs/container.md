@@ -9,6 +9,12 @@ Rust, Mise, Node, a browser, or browser drivers.
 
 The only host prerequisite is a working Docker-compatible engine. The image is
 local-only and is tagged `rust-browser-proofs:local` by the provided recipes.
+Cargo registry and target data for Rust-compiling container recipes live under
+`$RUST_BROWSER_PROOFS_CONTAINER_CACHE_DIR` when set, otherwise under
+`$XDG_CACHE_HOME/rust-browser-proofs/container-<architecture>` or
+`$HOME/cache/rust-browser-proofs/container-<architecture>`. The cache is
+host-backed so repeated proof runs do not redownload every crate into Docker's
+writable layer or put generated data in the source checkout.
 
 ## Commands
 
@@ -20,15 +26,20 @@ just container-test-consumer-firefox
 just container-test-consumer-playwright
 just container-test-consumer-puppeteer
 just container-test-consumer-desktop
-just container-report /tmp/rust-browser-proofs-container.md
+just container-report
 just security-source
 just security-image
 just security
 ```
 
-`container-report` creates a stopped container, runs the report inside it, and
-copies only the requested Markdown file to the host. The report describes the
-container environment, not the host environment.
+`container-report` creates a stopped container, runs the report inside it, then
+copies the requested Markdown file to the host and mirrors it into the native
+host-side SQLite cache. By default it writes a timestamped file under
+`$RUST_BROWSER_PROOFS_REPORT_DIR` when set, otherwise
+`$XDG_CACHE_HOME/rust-browser-proofs/browser-tests` or
+`$HOME/cache/rust-browser-proofs/browser-tests`; pass a path to override it.
+The cache database is `report-cache.sqlite3` beside the report. The report
+describes the container environment, not the host environment.
 
 ## Security Gates
 

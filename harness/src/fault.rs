@@ -46,6 +46,9 @@ pub enum OpKind {
 pub enum Action {
     /// Return a typed I/O error (error-path proof).
     InjectError,
+    /// Return a typed I/O error at and after the selected occurrence.
+    /// This crosses PageDB's bounded reconciliation retry.
+    InjectErrorPersistent,
     /// Post `phase-reached` to the worker's owner and await forever
     /// (termination-path proof; only meaningful inside the oracle worker).
     Park,
@@ -129,14 +132,18 @@ impl TriggerState {
             *e += 1;
             *e
         };
-        if n != self.at {
+        let should_fire = match self.action {
+            Action::InjectErrorPersistent => n >= self.at,
+            Action::InjectError | Action::Park => n == self.at,
+        };
+        if !should_fire {
             return Ok(());
         }
         self.fired.fetch_add(1, Ordering::Relaxed);
         match self.action {
-            Action::InjectError => Err(PagedbError::Io(std::io::Error::other(format!(
-                "fault injected at {kind:?} #{n}"
-            )))),
+            Action::InjectError | Action::InjectErrorPersistent => Err(PagedbError::Io(
+                std::io::Error::other(format!("fault injected at {kind:?} #{n}")),
+            )),
             Action::Park => {
                 post_beacon(&format!("phase-reached:{kind:?}#{n}"));
                 park_forever().await

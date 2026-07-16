@@ -68,5 +68,5 @@ jobs:
           cargo fmt --all -- --check
           cargo clippy --workspace --all-targets -- -D warnings
           cargo test --workspace
-          cargo run -p rust-browser-proofs -- -- cargo check -p rust-browser-proofs-consumer-fixture --target wasm32-unknown-unknown --tests
+          cargo run -p rust-browser-proofs --features runner -- -- cargo check -p rust-browser-proofs-consumer-fixture --target wasm32-unknown-unknown --tests
           cargo check -p pagedb-opfs-harness --target wasm32-unknown-unknown

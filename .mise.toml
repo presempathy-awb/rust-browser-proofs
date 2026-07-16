@@ -16,6 +16,10 @@ lefthook = "2.1.9"
 description = "Run native formatting, lint, test, wasm, runner, and source-security checks"
 run = "just verify"
 
+[tasks.install-wasm32-unknown-unknown]
+description = "Install Rustup's wasm32-unknown-unknown target"
+run = "just install-wasm32-unknown-unknown"
+
 [tasks.container-verify]
 description = "Build and validate the self-contained desktop-browser image"
 run = "just container-verify"

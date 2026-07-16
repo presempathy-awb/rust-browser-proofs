@@ -41,11 +41,20 @@ fn attribute_count(source: &str, attribute: &str) -> usize {
         .count()
 }
 
+fn scenario_count(source: &str) -> usize {
+    let explicit = attribute_count(source, "// browser-proof-scenario");
+    if explicit == 0 {
+        attribute_count(source, "#[wasm_bindgen_test]")
+    } else {
+        explicit
+    }
+}
+
 #[test]
 fn readme_suite_counts_match_test_sources() {
     for &(suite, source, expected) in SUITES {
         assert_eq!(
-            attribute_count(source, "#[wasm_bindgen_test]"),
+            scenario_count(source),
             expected,
             "update the expected source count for {suite}"
         );

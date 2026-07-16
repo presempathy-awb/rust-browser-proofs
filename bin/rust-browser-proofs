@@ -1,5 +1,5 @@
 #!/usr/bin/env sh
 set -eu
 
-root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-exec cargo run --quiet --manifest-path "$root/crates/rust-browser-proofs/Cargo.toml" -- "$@"
+root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
+exec cargo run --quiet --manifest-path "$root/crates/rust-browser-proofs/Cargo.toml" --features runner -- "$@"

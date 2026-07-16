@@ -19,6 +19,10 @@ crate-type = ["cdylib", "rlib"]
 idb-vendor-spike = ["pagedb/idb"]
 # Builds the self-contained, sacrificial worker used only by `idb_crash`.
 idb-crash-driver = ["pagedb/idb-crash-driver"]
+# Safari does not advance the crash test when its sacrificial worker is nested
+# under wasm-bindgen-test's dedicated worker. Keep the sacrificial worker real
+# while letting the browser page own it for Safari-family runs.
+idb-crash-browser-parent = []
 
 [dependencies]
 pagedb = { git = "ssh://git@git.telpher.stream:2222/awb/pagedb.git", branch = "main", features = ["opfs"] }

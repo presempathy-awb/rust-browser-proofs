@@ -69,6 +69,11 @@ fault-injection semantics without flattening them into generic OPFS claims.
 `fixtures/consumer-battery` is the minimal downstream proof: it depends only
 on `rust-browser-proofs` and emits the public battery without PageDB.
 
+The crate also proves that battery from its own package through
+`crates/rust-browser-proofs/tests/opfs_worker_battery.rs`. Run `just test-self`
+for the self-hosted Chrome and Firefox browser proof; run
+`just test-consumer-battery` to prove the separate downstream package boundary.
+
 ## Command Runner
 
 The crate also provides a local test-command runner. It does not define a new
@@ -94,7 +99,7 @@ rust-browser-proofs -- cargo test --workspace
 Generate a host capability report without claiming that any browser test ran:
 
 ```sh
-rust-browser-proofs --report /tmp/rust-browser-proofs-environment.md
+rust-browser-proofs --report
 ```
 
 Record the result of one explicit browser invocation in the same report:
@@ -102,30 +107,45 @@ Record the result of one explicit browser invocation in the same report:
 ```sh
 cd fixtures/consumer-battery
 rust-browser-proofs \
-  --report /tmp/rust-browser-proofs-chrome.md \
+  --report \
   -- wasm-pack test --headless --chrome
 ```
 
 The report has separate host-prerequisite and execution-evidence columns. A
 detected browser, driver, device tool, or simulator never becomes a passed
 browser test unless the exact invocation identifies that browser and exits
-successfully. `just report-environment` writes the report to
-`/tmp/rust-browser-proofs-environment.md` by default.
+successfully. `--report` and `just report-environment` write timestamped files
+under `$RUST_BROWSER_PROOFS_REPORT_DIR` when set, otherwise
+`$XDG_CACHE_HOME/rust-browser-proofs/browser-tests` or
+`$HOME/cache/rust-browser-proofs/browser-tests`. Pass `--report <path>` or
+`just report-environment <path>` to override that destination.
+
+Each report directory has a native-only `report-cache.sqlite3` sidecar. Its
+`report_cache` table keeps one transactionally upserted row per Markdown path,
+including the exact Markdown and its write timestamp. Use
+`rust-browser-proofs --mirror-report <path>` to add an existing report, such as
+one copied from the container runner, to that cache.
 
 The explicit Cargo form is equivalent and works from a sibling package checkout:
 
 ```sh
 cargo run \
   --manifest-path /Users/andrew/code/pres/brow/rust-browser-proofs/crates/rust-browser-proofs/Cargo.toml \
+  --features runner \
   -- -- wasm-pack test --headless --chrome
 ```
 
-`cargo install --path crates/rust-browser-proofs` is an optional global
+`cargo install --path crates/rust-browser-proofs --features runner` is an optional global
 convenience, not a setup requirement. Reinstall it after local runner changes;
 the Mise entrypoint always runs the current checkout.
 
 See [`docs/browser-environment-checklist.md`](docs/browser-environment-checklist.md)
 for current browser, device, driver, and CI evidence.
+See [`docs/proof-matrix.md`](docs/proof-matrix.md) for the separate generic
+crate and PageDB durability claims, their qualifying commands, and their
+current evidence status.
+See [`docs/host-platform-matrix.md`](docs/host-platform-matrix.md) for the
+separate macOS, Windows, Debian, Ubuntu, Manjaro, and Raspberry Pi host lanes.
 
 ## Containerized Desktop Proofs
 
@@ -173,9 +193,9 @@ separate proof gates and do not make fallback selection available.
 | Puppeteer Chromium | `just container-test-consumer-puppeteer` | Container-only, pinned `puppeteer-core` proof against Debian Chromium. It launches Chromium headlessly with its supported sandbox; it does not download a Puppeteer-managed browser. |
 | Opera | Deferred | Opera is Chromium-derived, not an independent engine. The container deliberately does not add a third-party Opera package source without a product-specific need. |
 | Desktop Safari/WebKit | `just test-safari` | Explicit durable OPFS target. Verifies `/usr/bin/safaridriver`, then runs the suite; use `just enable-safari-automation` first if Safari automation is disabled. Do not infer Safari from Chrome or Firefox. |
-| Android Chrome | `just test-consumer-battery-android-chrome` | Emulator-only generic OPFS battery. It never targets a physical serial, clears the test emulator's Chrome profile for a fresh OPFS quota state, launches Chrome with a temporary local DevTools endpoint, and requires the browser's own success output. The PageDB Android headless recipes remain separate while the upstream runner's Android-headless path is investigated. |
+| Android Chrome | `just test-consumer-battery-android-chrome` | Emulator-only generic OPFS battery. It never targets a physical serial, clears the test emulator's Chrome profile for a fresh OPFS quota state, temporarily enables release-Chrome debug flags, launches a local DevTools endpoint, and restores the prior command-line and Android `debug_app` state. It requires the browser's own success output. |
 | iPhone Safari | `just test-iphone-safari` | Simulator-backed WebKit target using `safaridriver` iOS capabilities. Boots `IOS_SIMULATOR_ID` or `iPhone 17 Pro`, verifies MobileSafari, and reuses the SafariDriver automation check before running. |
-| iPhone Chrome | `just install-iphone-chrome` / `just run-iphone-chrome` | App-shell target only. Chrome for iOS uses the iOS WebKit engine class, but the Chrome app shell is not proven unless `com.google.chrome` is installed and driven. If missing, set `IPHONE_CHROME_APP_PATH` to a simulator-compatible Chrome app bundle. |
+| iPhone Chrome or Chromium | `just run-iphone-chromium-source` / `just run-iphone-chrome` | App-shell target only. The public source route is verified with an arm64 Chromium Simulator build, a 15-second process/crash gate, and no real phone. It is not branded Google Chrome and does not add an engine result beyond iPhone Safari/WebKit. `IPHONE_CHROME_APP_PATH` accepts other compatible bundles and derives the bundle ID from `Info.plist`. |
 
 `just test-browsers` intentionally stays Chrome + Firefox because those are the
 fully automated local defaults. Use `just test-browsers-all` when Safari
@@ -188,6 +208,13 @@ Chrome, Firefox, Edge, and Safari; iPhone Safari in an iOS Simulator; and
 Android Chrome in the dedicated emulator. The Android route rejects physical
 serials and clears only the test emulator's Chrome profile before it runs.
 It does not imply that the separate PageDB Android headless recipes have passed.
+
+Chrome, Firefox, Edge, and the Android emulator run without taking desktop
+focus. SafariDriver has no true headless mode. Safari and iPhone Safari recipes
+therefore restore the most recent non-Safari foreground application on a
+best-effort basis; use a separate macOS VM or Apple test host when strict visual
+isolation is required. `SAFARI_FOCUS_GUARD=0` disables restoration for
+diagnostics.
 
 Android emulator retries are intentionally conservative. Automated Android
 recipes ignore ambient `ANDROID_SERIAL`; set `ANDROID_EMULATOR_SERIAL` only to
@@ -232,6 +259,7 @@ ignored `.tools/chromedriver` before strict Chrome tests run. Safari and mobile
 targets have additional WebDriver or device prerequisites listed above.
 
 ```sh
+just install-wasm32-unknown-unknown # installs only the Rustup-owned Wasm target
 just setup          # toolchain, wasm target, hooks
 just install-adb    # installs Android platform-tools through Homebrew if adb is missing
 just enable-safari-automation # enables Safari WebDriver automation when macOS admin auth is available
@@ -240,6 +268,7 @@ just install-iphone-chrome # installs IPHONE_CHROME_APP_PATH into the booted sim
 just install-chrome-driver # downloads the Chrome-for-Testing driver matching installed Chrome
 just check-chrome-driver # fast local ChromeDriver preflight
 just check-safari-driver # verifies SafariDriver can create an automation session
+just test-self      # crate-owned generic battery in headless Chrome and Firefox
 just test-consumer-battery # generic public battery in headless Chrome and Firefox
 just test-consumer-battery-edge # generic public battery in headless Microsoft Edge
 just test-consumer-battery-webkit # generic public battery in desktop and iPhone Safari
@@ -262,8 +291,50 @@ just run-iphone-safari "http://127.0.0.1:8000" # launch MobileSafari in the boot
 just run-iphone-chrome "http://127.0.0.1:8000" # launch Chrome iOS app shell when installed
 just test-idb-chrome # local-only IDB spike, VFS, file-sync crash, receipt, and cross-worker/cross-tab lock proof
 just test-idb-firefox # local-only IDB spike, VFS, file-sync crash, receipt, and cross-worker/cross-tab lock proof
+just test-idb-edge # the same 25 IDB scenarios in isolated headless Edge via CDP
+just test-idb-safari # all 25 IDB scenarios, including active-transaction worker termination
+just test-idb-iphone-safari # the same 25 scenarios in the iPhone Safari simulator
+just test-idb-android-chrome # all 25 scenarios in the windowless Android Chrome emulator
 just test-native    # native-side tests (codec, receipt reference)
 ```
+
+### iPhone Chrome Or Chromium Simulator App
+
+See the complete
+[`iPhone Chrome Simulator Runbook`](docs/iphone-chrome-simulator.md) for the
+Google CI archive access probe, remote Pixel OAuth procedure, artifact evidence,
+credential cleanup, and exact branded-Chrome boundary.
+
+The App Store device binary is not a Simulator fixture. The publicly buildable
+no-phone route is open-source Chromium for iOS, which exercises a Chromium app
+shell on the same WebKit engine but is not the branded Google Chrome release.
+Chromium's checkout is large; its documentation estimates roughly 30 GB for a
+shared Git cache and at least 30 minutes for a fast initial fetch.
+
+The durable source route keeps all large data under `~/.volumes/chromium` and
+rejects roots under `~/code`. Full fetch and build output goes to the
+timestamped log under `~/.volumes/chromium/logs`; the terminal receives bounded
+phase heartbeats and a capped failure tail. The compile also denies reads from
+`~/node_modules`, preventing ambient host packages from changing the pinned
+source build:
+
+```sh
+just build-iphone-chromium-source
+just run-iphone-chromium-source "https://example.com/"
+```
+
+The first source build persists its exact Chromium revision; retries reuse it.
+Use `CHROMIUM_REFRESH_REVISION=1` only when intentionally selecting a newer
+successful public iOS builder revision. The source runner skips first-run UI,
+disables the unsupported unbranded privacy-context variation, delivers one URL
+to a freshly launched process, and requires a 15-second crash-free survival
+window before reporting success.
+
+The installer reads `CFBundleIdentifier` from the app. Use
+`IPHONE_CHROME_BUNDLE_ID` only for an already-installed custom build that the
+standard Google/Chromium candidates do not identify. Use
+`IPHONE_CHROME_URL_SCHEME` when that build does not register the normal
+`googlechrome[s]` or `chromium[s]` schemes.
 
 ## Gitea Actions prerequisite
 

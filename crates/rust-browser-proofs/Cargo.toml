@@ -6,6 +6,14 @@ license.workspace = true
 publish = false
 description = "Dev-only Rust/Wasm OPFS browser proof battery"
 
+[features]
+runner = ["dep:rusqlite"]
+
+[[bin]]
+name = "rust-browser-proofs"
+path = "src/bin/rust-browser-proofs.rs"
+required-features = ["runner"]
+
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 js-sys = "0.3"
 wasm-bindgen = "0.2"
@@ -25,3 +33,6 @@ web-sys = { version = "0.3", features = [
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
 wasm-bindgen-test = "0.3"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+rusqlite = { version = "0.40.1", default-features = false, features = ["bundled"], optional = true }

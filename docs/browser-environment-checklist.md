@@ -1,20 +1,30 @@
 # Browser And Environment Checklist
 
-Last reviewed: 2026-07-14. This is an evidence ledger, not a compatibility
+Last reviewed: 2026-07-16. This is an evidence ledger, not a compatibility
 claim. A checked item has fresh evidence; an unchecked item is either wired but
 not executed, or blocked by the prerequisite stated beside it.
+
+The [proof matrix](proof-matrix.md) separates the reusable crate's generic
+OPFS claim from the PageDB harness durability claim. Do not promote a checked
+generic result to PageDB durability coverage.
 
 ## Generic Crate Contract
 
 - [x] `rust-browser-proofs` remains a dev-only test crate with no PageDB dependency.
 - [x] A standalone consumer fixture compiles for `wasm32-unknown-unknown`.
+- [x] `just test-self` executed the crate-owned
+  `opfs_worker_battery!()` integration test in headless Chrome and Firefox;
+  both generated tests passed in each engine.
 - [x] `just test-consumer-battery` executed the fixture's
   `opfs_worker_battery!()` in headless Chrome and Firefox: sync-handle round
   trip and raw sync baseline both passed in each engine.
 - [x] `rust-browser-proofs -- <command>` selects Rustup's `rustc` and `cargo`
   for a consumer-selected regular test command.
-- [ ] A hosted Git revision has been pinned and exercised by an unrelated
-  repository. The current proof is local-only.
+- [x] An isolated consumer at
+  `/Users/andrew/cache/rust-browser-proofs/hosted-consumer-proof` pinned Gitea
+  revision `6f922604b33b39af1b02cb9accfdcc2fc3843c69`, compiled it for Wasm, and
+  passed the exported public battery in Chrome and Firefox. No repository or
+  remote was mutated to produce this proof.
 
 ## PageDB Integration
 
@@ -24,8 +34,9 @@ not executed, or blocked by the prerequisite stated beside it.
   passed both browser tests in headless Chrome.
 - [x] Native workspace tests passed.
 - [x] Generic-consumer and PageDB harness wasm32 compile checks passed.
-- [ ] The full PageDB durable Chrome matrix has not been rerun after the crate
-  extraction. It requires the repository-pinned ChromeDriver.
+- [x] `just test-browsers` freshly passed the current 67-case PageDB durable
+  matrix in desktop Chrome and Firefox. Chrome uses the repository-pinned
+  ChromeDriver.
 
 ## Browser Matrix
 
@@ -41,14 +52,16 @@ not executed, or blocked by the prerequisite stated beside it.
   starting WebDriver.
 - [x] `just test-consumer-battery` passes the public consumer battery in both
   installed desktop browser engines.
-- [ ] Full PageDB durable suite rerun through `just test-chrome`.
+- [x] Full current PageDB durable suite passed through `just test-chrome` as
+  part of `just test-browsers`.
 
 ### Desktop Firefox
 
 - [x] Firefox is installed on this macOS host.
 - [x] Generic consumer battery executed in Firefox through
   `just test-consumer-battery`.
-- [ ] Full PageDB durable suite executed through `just test-firefox`.
+- [x] Full current PageDB durable suite passed through `just test-firefox` as
+  part of `just test-browsers`.
 
 ### Playwright Chromium
 
@@ -78,6 +91,8 @@ not executed, or blocked by the prerequisite stated beside it.
   isolated headless Edge profile. The recipe drives Edge through its local CDP
   endpoint because the current upstream runner's legacy Edge WebDriver path
   does not complete.
+- [x] `just test-edge` passed all 67 PageDB OPFS scenarios.
+- [x] `just test-idb-edge` passed all 25 local PageDB IDB scenarios.
 
 ### Desktop Safari Or WebKit
 
@@ -85,7 +100,13 @@ not executed, or blocked by the prerequisite stated beside it.
 - [x] Remote Safari automation session verified with `just check-safari-driver`.
 - [x] Generic consumer battery executed in Safari: both the sync-access-handle
   round trip and raw-sync baseline passed.
-- [ ] Full PageDB durable suite executed through `just test-safari`.
+- [x] Full 67-test PageDB durable suite passed through `just test-safari`.
+- [x] Desktop Safari has evidence for all 25 IDB scenarios. The PageDB crash
+  driver now keeps the active namespace transaction alive with one pending IDB
+  request at a time, and all four worker-termination cuts pass serially.
+- [x] Safari commands use best-effort foreground restoration. SafariDriver has
+  no true headless mode; strict no-focus proof requires a separate macOS VM or
+  Apple host. Set `SAFARI_FOCUS_GUARD=0` only to diagnose automation behavior.
 
 ### Android Chrome
 
@@ -96,9 +117,18 @@ not executed, or blocked by the prerequisite stated beside it.
   and accept only `ANDROID_EMULATOR_SERIAL` values beginning with `emulator-`.
   The route patches only the upstream test-runner's unconditional `SharedWorker`
   wrapper, resets the test emulator's Chrome profile for a fresh OPFS quota
-  state, and requires the browser-reported success result.
-- [ ] PageDB bounded smoke executed through `just test-android-chrome`.
-- [ ] Full PageDB Android matrix executed through `just test-android-chrome-all`.
+  state, temporarily enables release-Chrome debug flags, and requires the
+  browser-reported success result. It restores the previous Chrome command-line
+  file and Android `debug_app` state during cleanup.
+- [x] PageDB bounded smoke passed through `just test-android-chrome`.
+- [x] Full 67-test PageDB Android matrix passed through
+  `just test-android-chrome-all`. The PageDB route uses the same emulator-only
+  CDP transport, gives every suite a fresh server port, recursively terminates
+  the interactive runner, and restores Chrome command-line and Android
+  `debug_app` state during cleanup.
+- [x] `just test-idb-android-chrome` passed all 25 IDB scenarios on the managed
+  Pixel 8 AVD. The AVD runs with `-no-window`; no Android device is attached or
+  required.
 
 ### iPhone Safari
 
@@ -106,15 +136,51 @@ not executed, or blocked by the prerequisite stated beside it.
 - [x] MobileSafari availability verified with `just check-iphone-safari`.
 - [x] Generic consumer battery executed in iPhone Safari: both public OPFS
   tests passed through SafariDriver's iOS simulator capability.
-- [ ] Full PageDB iPhone Safari suite executed through `just test-iphone-safari`.
+- [x] Full 67-test PageDB iPhone Safari suite passed through
+  `just test-iphone-safari`.
+- [x] iPhone Safari has evidence for all 25 IDB scenarios. The previously
+  blocked active-transaction worker-termination cut passed with the PageDB
+  request-pump crash hook. A later one-shot rerun stalled before loading the
+  already-proven cross-worker suite, so simulator-runner cleanup remains a
+  separate reliability item.
+
+### Optional Local IDB
+
+- [x] The gitignored workspace Cargo patch selects the isolated local PageDB
+  `codex/idb-safari-worker-termination` workspace without changing the committed
+  dependency.
+- [x] `just test-idb-chrome` passed 25 opt-in IDB tests in Chrome.
+- [x] `just test-idb-firefox` passed the same 25 opt-in IDB tests in Firefox.
+- [x] `just test-idb-edge` passed the same 25 opt-in IDB tests in Edge.
+- [x] `just test-idb-android-chrome` passed the same 25 opt-in IDB tests in the
+  windowless Android Chrome emulator.
+- [x] Desktop and iPhone Safari each have evidence for all 25 scenarios. The
+  fixed crash hook keeps a real IDB transaction active with one request at a
+  time instead of blocking WebKit in a CPU-bound Wasm loop.
+- [x] These results prove the local design and selected parity boundaries only;
+  they do not select IDB as an automatic fallback.
 
 ### iPhone Chrome
 
+- [x] The Google CI archive access, remote OAuth, evidence-preservation,
+  source-build fallback, and branded-Chrome boundary are documented in the
+  [iPhone Chrome Simulator Runbook](iphone-chrome-simulator.md).
+- [x] Both requested Google identities completed OAuth and were tested against
+  Stable, Beta, Dev, and Canary archive paths. Both received a confirmed
+  `403 storage.objects.list` IAM denial; no archive was listed or downloaded.
 - [x] An iOS simulator is booted.
-- [ ] Chrome for iOS is not installed in the simulator. No simulator-compatible
-  `com.google.chrome` bundle is available locally.
-- [ ] Chrome app-shell launch verified with `just check-iphone-chrome`.
-- [ ] This target is an app-shell check only. Chrome for iOS uses WebKit, so it
+- [x] The installer recognizes Google Chrome's `com.google.chrome.ios` bundle
+  ID and derives custom or source-built Chromium bundle IDs from `Info.plist`.
+- [x] Source-built arm64 `Chromium.app` revision
+  `216dab31f6c4aaf18abd8e85e7af247a48a8a4be` is retained outside `~/code` and
+  installed in the simulator as `org.chromium.ost.chrome.ios.dev`.
+- [x] Chromium app-shell URL launch passed through
+  `just run-iphone-chromium-source 'https://example.com/'`; the process survived
+  the 15-second crash window with no new Chromium crash report.
+- [ ] Exact branded Google Chrome remains unverified because neither Google
+  identity could read the private Simulator archive and an App Store device
+  binary is not a Simulator fixture.
+- [x] This target is an app-shell check only. Chrome for iOS uses WebKit, so it
   does not create an independent browser-engine durability result.
 
 ### Edge
@@ -125,6 +191,8 @@ not executed, or blocked by the prerequisite stated beside it.
 ## Toolchain And CI
 
 - [x] Rustup owns the installed `wasm32-unknown-unknown` target.
+- [x] `just install-wasm32-unknown-unknown` installs that target without
+  requiring the rest of repository setup.
 - [x] The runner and wasm recipes select Rustup rather than the ambient
   Homebrew Rust, whose sysroot lacks that target.
 - [x] `cargo fmt --all -- --check` and workspace Clippy passed.
@@ -137,11 +205,18 @@ not executed, or blocked by the prerequisite stated beside it.
   `PAGEDB_DEPLOY_KEY` secret is a dedicated read-only deploy key for this
   repository's workflow.
 
+Host operating-system coverage and blockers are tracked independently in the
+[host platform matrix](host-platform-matrix.md). In particular, Ubuntu CI is
+compile-only; Windows, Manjaro, and Raspberry Pi browser execution are not
+currently green.
+
 ## Containerized Desktop Lane
 
 - [x] The local Docker image was built and run for this revision.
 - [x] Desktop Chromium consumer battery executed through
-  `just container-test-consumer-chrome`.
+  `just container-test-consumer-chrome`; the fresh 2026-07-16 arm64 Debian
+  image used Chromium and ChromeDriver 150.0.7871.124 and passed both generic
+  OPFS tests.
 - [x] Desktop Firefox consumer battery executed through
   `just container-test-consumer-firefox`.
 - [x] Container report generated through `just container-report <path>`.
@@ -168,6 +243,7 @@ The explicit Cargo form works from a sibling package checkout:
 ```sh
 cargo run \
   --manifest-path /Users/andrew/code/pres/brow/rust-browser-proofs/crates/rust-browser-proofs/Cargo.toml \
+  --features runner \
   -- -- wasm-pack test --headless --chrome
 ```
 
@@ -175,14 +251,14 @@ An optional global install has the same interface but must be refreshed after
 local runner changes:
 
 ```sh
-cargo install --path crates/rust-browser-proofs
+cargo install --path crates/rust-browser-proofs --features runner
 ```
 
 Generate a current Markdown host report without treating availability as test
 execution:
 
 ```sh
-rust-browser-proofs --report /tmp/rust-browser-proofs-environment.md
+rust-browser-proofs --report
 ```
 
 To add the outcome of a Chrome test, run it from a Cargo package directory:
@@ -190,7 +266,7 @@ To add the outcome of a Chrome test, run it from a Cargo package directory:
 ```sh
 cd fixtures/consumer-battery
 rust-browser-proofs \
-  --report /tmp/rust-browser-proofs-chrome.md \
+  --report \
   -- wasm-pack test --headless --chrome
 ```
 

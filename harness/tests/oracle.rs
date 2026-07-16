@@ -291,12 +291,12 @@ async fn run_error_injection(root: &str, kind: OpKind, at: u64, published: bool)
     driver::oracle_seed(root.to_string()).await.unwrap();
 
     {
-        let vfs = FaultVfs::new_unarmed(
-            OpfsVfs::with_root(root).await.unwrap(),
-            kind,
-            at,
-            Action::InjectError,
-        );
+        let action = if published {
+            Action::InjectErrorPersistent
+        } else {
+            Action::InjectError
+        };
+        let vfs = FaultVfs::new_unarmed(OpfsVfs::with_root(root).await.unwrap(), kind, at, action);
         let db = Db::open_existing(vfs.clone(), KEK, PAGE, REALM)
             .await
             .unwrap();
@@ -316,7 +316,17 @@ async fn run_error_injection(root: &str, kind: OpKind, at: u64, published: bool)
         w.link_segment("inject.seg", &meta).await.unwrap();
         vfs.arm();
         let err = w.commit().await.expect_err("injected fault must surface");
-        assert!(matches!(err, PagedbError::Io(_)), "typed error expected");
+        if published {
+            assert!(
+                matches!(err, PagedbError::DurablyCommittedButUnpublished { .. }),
+                "post-publication failure must require reopen, got {err:?}"
+            );
+        } else {
+            assert!(
+                matches!(err, PagedbError::Io(_)),
+                "pre-publication failure must remain an I/O error, got {err:?}"
+            );
+        }
         assert!(vfs.fired(), "trigger did not fire");
     }
 

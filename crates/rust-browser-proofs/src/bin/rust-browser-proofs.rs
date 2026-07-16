@@ -6,8 +6,10 @@ use std::{
     fs,
     path::{Path, PathBuf},
     process::{self, Command, ExitCode},
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
+
+use rusqlite::{Connection, TransactionBehavior, params};
 
 fn main() -> ExitCode {
     match run(env::args_os().skip(1).collect()) {
@@ -21,6 +23,16 @@ fn main() -> ExitCode {
 
 fn run(arguments: Vec<OsString>) -> Result<u8, String> {
     let invocation = Invocation::parse(arguments)?;
+    if let Some(report_path) = &invocation.mirror_report_path {
+        let report = fs::read_to_string(report_path)
+            .map_err(|error| format!("could not read report {}: {error}", report_path.display()))?;
+        mirror_report_in_cache(report_path, &report)?;
+        println!(
+            "rust-browser-proofs: mirrored Markdown report in {}",
+            report_cache_path(report_path).display()
+        );
+        return Ok(0);
+    }
     let environment = EnvironmentSnapshot::collect();
     let command_result = if let Some(command) = &invocation.command {
         reject_virtual_workspace_wasm_pack(command)?;
@@ -398,7 +410,102 @@ fn write_report(path: &Path, report: &str) -> Result<(), String> {
         })?;
     }
     fs::write(path, report)
-        .map_err(|error| format!("could not write report {}: {error}", path.display()))
+        .map_err(|error| format!("could not write report {}: {error}", path.display()))?;
+    mirror_report_in_cache(path, report)
+}
+
+fn report_cache_path(report_path: &Path) -> PathBuf {
+    report_path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."))
+        .join("report-cache.sqlite3")
+}
+
+fn mirror_report_in_cache(report_path: &Path, report: &str) -> Result<(), String> {
+    let cache_path = report_cache_path(report_path);
+    let mut connection = Connection::open(&cache_path).map_err(|error| {
+        format!(
+            "could not open report cache {}: {error}",
+            cache_path.display()
+        )
+    })?;
+    let transaction = connection
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|error| {
+            format!(
+                "could not start report cache transaction {}: {error}",
+                cache_path.display()
+            )
+        })?;
+    transaction
+        .execute_batch(
+            "CREATE TABLE IF NOT EXISTS report_cache (\
+                markdown_path TEXT PRIMARY KEY NOT NULL,\
+                markdown TEXT NOT NULL,\
+                written_at_unix_ms INTEGER NOT NULL\
+            ) STRICT;",
+        )
+        .map_err(|error| {
+            format!(
+                "could not create report cache schema {}: {error}",
+                cache_path.display()
+            )
+        })?;
+    let written_at_unix_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| format!("could not timestamp report cache row: {error}"))?
+        .as_millis() as i64;
+    transaction
+        .execute(
+            "INSERT INTO report_cache (markdown_path, markdown, written_at_unix_ms)
+             VALUES (?1, ?2, ?3)
+             ON CONFLICT(markdown_path) DO UPDATE SET
+                 markdown = excluded.markdown,
+                 written_at_unix_ms = excluded.written_at_unix_ms",
+            params![
+                report_path.display().to_string(),
+                report,
+                written_at_unix_ms
+            ],
+        )
+        .map_err(|error| {
+            format!(
+                "could not store report cache row {}: {error}",
+                cache_path.display()
+            )
+        })?;
+    transaction.commit().map_err(|error| {
+        format!(
+            "could not commit report cache transaction {}: {error}",
+            cache_path.display()
+        )
+    })
+}
+
+fn default_report_path() -> Result<PathBuf, String> {
+    let cache_root = env::var_os("RUST_BROWSER_PROOFS_REPORT_DIR")
+        .map(PathBuf::from)
+        .or_else(|| {
+            env::var_os("XDG_CACHE_HOME")
+                .map(|path| PathBuf::from(path).join("rust-browser-proofs/browser-tests"))
+        })
+        .or_else(|| {
+            env::var_os("HOME")
+                .map(|path| PathBuf::from(path).join("cache/rust-browser-proofs/browser-tests"))
+        })
+        .ok_or_else(|| {
+            "could not determine a report directory; set RUST_BROWSER_PROOFS_REPORT_DIR or HOME"
+                .to_owned()
+        })?;
+    let generated_at = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| format!("could not timestamp report path: {error}"))?;
+    Ok(timestamped_report_path(cache_root, generated_at))
+}
+
+fn timestamped_report_path(cache_root: PathBuf, generated_at: Duration) -> PathBuf {
+    cache_root.join(format!("{}-test-status.md", generated_at.as_millis()))
 }
 
 fn render_report(
@@ -421,6 +528,8 @@ fn render_report(
     let chrome_test = browser_test_status(invocation, command_result, "--chrome");
     let firefox_test = browser_test_status(invocation, command_result, "--firefox");
     let safari_test = browser_test_status(invocation, command_result, "--safari");
+    let iphone_chrome_test =
+        just_recipe_status(invocation, command_result, "run-iphone-chromium-source");
 
     format!(
         "# Rust Browser Proof Environment Report\n\n\
@@ -442,10 +551,11 @@ Generated at Unix timestamp `{generated_at}`.\n\n\
 | ChromeDriver | {} | {} | Driver presence is not a browser test result |\n\
 | Android Chrome | {} | {} | Not exercised by this runner invocation |\n\
 | iPhone Safari | {} | {} | Not exercised by this runner invocation |\n\
-| iPhone Chrome | {} | {} | Not exercised by this runner invocation |\n\n\
+| iPhone Chrome | {} | {} | {iphone_chrome_test} |\n\n\
 ## Interpretation\n\n\
 - `available` means the local prerequisite probe succeeded; it does not prove storage behavior.\n\
-- A browser is `passed` only when this exact invocation was an explicit `wasm-pack` run for that browser and exited successfully.\n\
+- A storage battery is `passed` only when this exact invocation was an explicit `wasm-pack` run for that browser and exited successfully.\n\
+- The iPhone Chromium source recipe reports app-shell launch and survival only; it does not claim an OPFS or PageDB test.\n\
 - Mobile and Edge need their named runner/device workflow before they can claim execution coverage.\n",
         environment.rustup.status,
         markdown_cell(&environment.rustup.detail),
@@ -494,6 +604,34 @@ fn browser_test_status(
     )
 }
 
+fn just_recipe_status(
+    invocation: &Invocation,
+    command_result: Option<&CommandResult>,
+    recipe: &str,
+) -> String {
+    let Some(command) = &invocation.command else {
+        return "not run".to_owned();
+    };
+    if command.program != OsStr::new("just")
+        || command
+            .arguments
+            .first()
+            .is_none_or(|argument| argument != recipe)
+    {
+        return "not identified by this command".to_owned();
+    }
+    command_result.map_or_else(
+        || "not run".to_owned(),
+        |result| {
+            format!(
+                "{} (exit {}) - app shell only",
+                result.label(),
+                result.exit_code
+            )
+        },
+    )
+}
+
 fn format_command(command: &CommandInvocation) -> String {
     std::iter::once(&command.program)
         .chain(command.arguments.iter())
@@ -511,6 +649,7 @@ fn markdown_cell(value: &str) -> String {
 
 struct Invocation {
     report_path: Option<PathBuf>,
+    mirror_report_path: Option<PathBuf>,
     command: Option<CommandInvocation>,
 }
 
@@ -522,6 +661,7 @@ struct CommandInvocation {
 impl Invocation {
     fn parse(mut arguments: Vec<OsString>) -> Result<Self, String> {
         let mut report_path = None;
+        let mut mirror_report_path = None;
         while let Some(argument) = arguments.first() {
             if argument == "--help" || argument == "-h" {
                 print_help();
@@ -529,14 +669,33 @@ impl Invocation {
             }
             if argument == "--report" {
                 arguments.remove(0);
+                let path = match arguments.first() {
+                    None => default_report_path()?,
+                    Some(argument) if argument == "--" => default_report_path()?,
+                    Some(argument) if argument == "--mirror-report" => {
+                        return Err(
+                            "`--mirror-report` cannot be combined with `--report`".to_owned()
+                        );
+                    }
+                    Some(_) => PathBuf::from(arguments.remove(0)),
+                };
+                if report_path.replace(path).is_some() {
+                    return Err("`--report` may only be supplied once".to_owned());
+                }
+                continue;
+            }
+            if argument == "--mirror-report" {
+                arguments.remove(0);
                 let path = arguments
                     .first()
                     .cloned()
-                    .ok_or_else(|| "expected a report path after `--report`".to_owned())?;
+                    .ok_or_else(|| "expected a Markdown path after `--mirror-report`".to_owned())?;
+                if path == "--report" {
+                    return Err("`--mirror-report` cannot be combined with `--report`".to_owned());
+                }
                 arguments.remove(0);
-                let path = PathBuf::from(path);
-                if report_path.replace(path).is_some() {
-                    return Err("`--report` may only be supplied once".to_owned());
+                if mirror_report_path.replace(PathBuf::from(path)).is_some() {
+                    return Err("`--mirror-report` may only be supplied once".to_owned());
                 }
                 continue;
             }
@@ -550,14 +709,20 @@ impl Invocation {
             program,
             arguments: arguments.collect(),
         });
-        if command.is_none() && report_path.is_none() {
+        if mirror_report_path.is_some() && (report_path.is_some() || command.is_some()) {
             return Err(
-                "expected a command after `--`, or `--report <path>` for a host capability report"
+                "`--mirror-report` cannot be combined with `--report` or a command".to_owned(),
+            );
+        }
+        if command.is_none() && report_path.is_none() && mirror_report_path.is_none() {
+            return Err(
+                "expected a command after `--`, `--report [path]`, or `--mirror-report <path>`"
                     .to_owned(),
             );
         }
         Ok(Self {
             report_path,
+            mirror_report_path,
             command,
         })
     }
@@ -565,24 +730,29 @@ impl Invocation {
 
 fn print_help() {
     println!(
-        "Usage: rust-browser-proofs [--report <path>] [--] <command> [args...]\n\
+        "Usage: rust-browser-proofs [--report [path] | --mirror-report <path>] [--] <command> [args...]\n\
          \n\
          Runs the command with rustup's selected rustc and cargo first on PATH.\n\
          \n\
-         `--report <path>` writes the host and invocation status as Markdown.\n\
+         `--report` writes the host and invocation status to the project cache; pass a path to override it.\n\
+         `--mirror-report <path>` stores an existing Markdown report in its adjacent SQLite cache.\n\
          Run wasm-pack from a Cargo package directory.\n\
-         Example: rust-browser-proofs -- wasm-pack test --headless --chrome"
+         Example: rust-browser-proofs --report -- wasm-pack test --headless --chrome"
     );
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        CommandInvocation, CommandResult, Invocation, browser_test_status,
-        virtual_workspace_wasm_pack_error,
+        CommandInvocation, CommandResult, Invocation, browser_test_status, just_recipe_status,
+        report_cache_path, timestamped_report_path, virtual_workspace_wasm_pack_error,
+        write_report,
     };
+    use rusqlite::Connection;
     use std::ffi::{OsStr, OsString};
+    use std::fs;
     use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn parses_a_command_after_the_separator() {
@@ -619,19 +789,99 @@ mod tests {
     }
 
     #[test]
-    fn rejects_a_report_flag_without_a_path() {
-        let error = match Invocation::parse(vec![OsString::from("--report")]) {
-            Ok(_) => panic!("an output path is required after --report"),
-            Err(error) => error,
-        };
+    fn parses_an_existing_report_to_mirror() {
+        let invocation = Invocation::parse(vec![
+            OsString::from("--mirror-report"),
+            OsString::from("browser-status.md"),
+        ])
+        .unwrap();
 
-        assert!(error.contains("report path"));
+        assert_eq!(
+            invocation.mirror_report_path,
+            Some(PathBuf::from("browser-status.md"))
+        );
+        assert!(invocation.command.is_none());
+    }
+
+    #[test]
+    fn rejects_combined_report_modes() {
+        assert!(
+            Invocation::parse(vec![
+                OsString::from("--report"),
+                OsString::from("--mirror-report"),
+                OsString::from("browser-status.md"),
+            ])
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn uses_the_project_cache_when_report_has_no_path() {
+        let invocation = Invocation::parse(vec![OsString::from("--report")]).unwrap();
+        let report_path = invocation.report_path.unwrap();
+
+        assert_eq!(
+            report_path.parent().unwrap().file_name().unwrap(),
+            "browser-tests"
+        );
+        assert!(
+            report_path
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .ends_with("-test-status.md")
+        );
+    }
+
+    #[test]
+    fn names_timestamped_reports_inside_the_cache_directory() {
+        let report_path = timestamped_report_path(
+            PathBuf::from("/cache/rust-browser-proofs/browser-tests"),
+            std::time::Duration::from_millis(1_724_096_260_123),
+        );
+
+        assert_eq!(
+            report_path,
+            PathBuf::from("/cache/rust-browser-proofs/browser-tests/1724096260123-test-status.md")
+        );
+    }
+
+    #[test]
+    fn mirrors_each_markdown_report_in_one_sqlite_row() {
+        let report_directory = std::env::temp_dir().join(format!(
+            "rust-browser-proofs-report-cache-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let report_path = report_directory.join("environment.md");
+
+        write_report(&report_path, "first report").unwrap();
+        write_report(&report_path, "updated report").unwrap();
+
+        assert_eq!(fs::read_to_string(&report_path).unwrap(), "updated report");
+
+        let connection = Connection::open(report_cache_path(&report_path)).unwrap();
+        let (row_count, markdown): (i64, String) = connection
+            .query_row(
+                "SELECT COUNT(*), MAX(markdown) FROM report_cache WHERE markdown_path = ?1",
+                [&report_path.display().to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(row_count, 1);
+        assert_eq!(markdown, "updated report");
+
+        fs::remove_dir_all(report_directory).unwrap();
     }
 
     #[test]
     fn reports_only_the_explicit_browser_as_executed() {
         let invocation = Invocation {
             report_path: None,
+            mirror_report_path: None,
             command: Some(CommandInvocation {
                 program: OsString::from("wasm-pack"),
                 arguments: vec![OsString::from("test"), OsString::from("--chrome")],
@@ -646,6 +896,27 @@ mod tests {
         assert_eq!(
             browser_test_status(&invocation, Some(&result), "--firefox"),
             "not identified by this command"
+        );
+    }
+
+    #[test]
+    fn reports_the_named_iphone_chromium_recipe_as_executed() {
+        let invocation = Invocation {
+            report_path: None,
+            mirror_report_path: None,
+            command: Some(CommandInvocation {
+                program: OsString::from("just"),
+                arguments: vec![
+                    OsString::from("run-iphone-chromium-source"),
+                    OsString::from("https://example.com/"),
+                ],
+            }),
+        };
+        let result = CommandResult { exit_code: 0 };
+
+        assert_eq!(
+            just_recipe_status(&invocation, Some(&result), "run-iphone-chromium-source"),
+            "passed (exit 0) - app shell only"
         );
     }
 

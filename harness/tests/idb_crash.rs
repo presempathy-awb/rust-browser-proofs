@@ -4,13 +4,18 @@
 
 use std::{cell::RefCell, rc::Rc};
 
+#[cfg(not(feature = "idb-crash-browser-parent"))]
 use pagedb::vfs::{IdbStore, IdbVfs, OpenMode, Vfs, VfsFile};
+#[cfg(not(feature = "idb-crash-browser-parent"))]
 use pagedb::{Db, RealmId};
 use wasm_bindgen::JsCast;
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen_futures::JsFuture;
 use wasm_bindgen_test::*;
 
+#[cfg(feature = "idb-crash-browser-parent")]
+wasm_bindgen_test_configure!(run_in_browser);
+#[cfg(not(feature = "idb-crash-browser-parent"))]
 wasm_bindgen_test_configure!(run_in_dedicated_worker);
 
 const BOOTSTRAP: &str = r#"
@@ -29,21 +34,53 @@ self.onmessage = async (event) => {
 
 const DRIVER_GLUE: &str = include_str!("../pkg-idb-driver/pagedb_opfs_harness.js");
 const DRIVER_WASM: &[u8] = include_bytes!("../pkg-idb-driver/pagedb_opfs_harness_bg.wasm");
+#[cfg(not(feature = "idb-crash-browser-parent"))]
 const PAGE: usize = 4096;
+#[cfg(not(feature = "idb-crash-browser-parent"))]
 const KEK: [u8; 32] = [5u8; 32];
+#[cfg(not(feature = "idb-crash-browser-parent"))]
 const REALM: RealmId = RealmId::new([2u8; 16]);
+const MESSAGE_WAIT_ATTEMPTS: usize = 600;
 
 async fn sleep_ms(ms: i32) {
     let promise = js_sys::Promise::new(&mut |resolve, _| {
-        let scope: web_sys::WorkerGlobalScope = js_sys::global().unchecked_into();
-        scope
-            .set_timeout_with_callback_and_timeout_and_arguments_0(&resolve, ms)
+        let global = js_sys::global();
+        let set_timeout: js_sys::Function =
+            js_sys::Reflect::get(&global, &wasm_bindgen::JsValue::from_str("setTimeout"))
+                .unwrap()
+                .unchecked_into();
+        set_timeout
+            .call2(
+                &global,
+                &resolve,
+                &wasm_bindgen::JsValue::from_f64(f64::from(ms)),
+            )
             .unwrap();
     });
     let _ = JsFuture::from(promise).await;
 }
 
-fn spawn_crash_worker(root: &str, entrypoint: &str) -> (web_sys::Worker, Rc<RefCell<Vec<String>>>) {
+#[cfg(feature = "idb-crash-browser-parent")]
+async fn run_driver_to_completion(root: &str, entrypoint: &str) {
+    let (worker, messages) = spawn_crash_worker(root, entrypoint);
+    let message = wait_for_message(&messages).await;
+    worker.terminate();
+    assert_eq!(message, "driver-returned", "driver phase failed: {message}");
+}
+
+struct CrashWorker {
+    worker: web_sys::Worker,
+    object_url: String,
+}
+
+impl CrashWorker {
+    fn terminate(self) {
+        self.worker.terminate();
+        web_sys::Url::revoke_object_url(&self.object_url).expect("revoke crash-worker URL");
+    }
+}
+
+fn spawn_crash_worker(root: &str, entrypoint: &str) -> (CrashWorker, Rc<RefCell<Vec<String>>>) {
     let parts = js_sys::Array::of1(&wasm_bindgen::JsValue::from_str(BOOTSTRAP));
     let blob = web_sys::Blob::new_with_str_sequence(&parts).unwrap();
     let url = web_sys::Url::create_object_url_with_blob(&blob).unwrap();
@@ -60,6 +97,18 @@ fn spawn_crash_worker(root: &str, entrypoint: &str) -> (web_sys::Worker, Rc<RefC
     worker.set_onmessage(Some(onmessage.as_ref().unchecked_ref()));
     onmessage.forget();
 
+    let sink = Rc::clone(&messages);
+    let onerror: Closure<dyn FnMut(web_sys::ErrorEvent)> =
+        Closure::wrap(Box::new(move |event: web_sys::ErrorEvent| {
+            sink.borrow_mut().push(format!(
+                "driver-error:{}:{}",
+                event.message(),
+                event.lineno()
+            ));
+        }));
+    worker.set_onerror(Some(onerror.as_ref().unchecked_ref()));
+    onerror.forget();
+
     let input = js_sys::Object::new();
     let set = |key: &str, value: &wasm_bindgen::JsValue| {
         js_sys::Reflect::set(&input, &wasm_bindgen::JsValue::from_str(key), value).unwrap();
@@ -70,19 +119,26 @@ fn spawn_crash_worker(root: &str, entrypoint: &str) -> (web_sys::Worker, Rc<RefC
     set("root", &wasm_bindgen::JsValue::from_str(root));
     set("entrypoint", &wasm_bindgen::JsValue::from_str(entrypoint));
     worker.post_message(&input).unwrap();
-    (worker, messages)
+    (
+        CrashWorker {
+            worker,
+            object_url: url,
+        },
+        messages,
+    )
 }
 
 async fn wait_for_message(messages: &Rc<RefCell<Vec<String>>>) -> String {
-    for _ in 0..600 {
+    for _ in 0..MESSAGE_WAIT_ATTEMPTS {
         if let Some(message) = messages.borrow_mut().pop() {
             return message;
         }
         sleep_ms(50).await;
     }
-    panic!("crash driver did not reach its file-sync beacon within 30s");
+    panic!("crash driver did not reach its completion beacon before the timeout");
 }
 
+#[cfg(not(feature = "idb-crash-browser-parent"))]
 async fn seed_baseline(root: &str) {
     let vfs = IdbVfs::with_root(root).await.unwrap();
     let mut baseline = vfs.open("baseline", OpenMode::CreateNew).await.unwrap();
@@ -91,6 +147,7 @@ async fn seed_baseline(root: &str) {
     vfs.sync_dir("/").await.unwrap();
 }
 
+#[cfg(not(feature = "idb-crash-browser-parent"))]
 async fn seed_database(root: &str) {
     let vfs = IdbVfs::with_root(root).await.unwrap();
     let db = Db::open_internal(vfs, KEK, PAGE, REALM).await.unwrap();
@@ -99,114 +156,178 @@ async fn seed_database(root: &str) {
     write.commit().await.unwrap();
 }
 
-#[wasm_bindgen_test]
+#[cfg_attr(not(feature = "idb-crash-browser-parent"), wasm_bindgen_test)]
+// browser-proof-scenario
 async fn idb_vfs_worker_termination_after_file_sync_keeps_metadata_unpublished() {
     let root = format!("crash-file-sync-{}", js_sys::Date::now());
-    let database = format!("pagedb-idb-vfs:{root}");
-    seed_baseline(&root).await;
+    #[cfg(feature = "idb-crash-browser-parent")]
+    {
+        run_driver_to_completion(&root, "idb_seed_baseline").await;
+        let (worker, messages) = spawn_crash_worker(&root, "idb_crash_after_file_sync");
+        assert_eq!(wait_for_message(&messages).await, "idb-file-synced");
+        worker.terminate();
+        run_driver_to_completion(&root, "idb_verify_file_sync").await;
+    }
+    #[cfg(not(feature = "idb-crash-browser-parent"))]
+    {
+        let database = format!("pagedb-idb-vfs:{root}");
+        seed_baseline(&root).await;
 
-    let (worker, messages) = spawn_crash_worker(&root, "idb_crash_after_file_sync");
-    assert_eq!(wait_for_message(&messages).await, "idb-file-synced");
-    worker.terminate();
+        let (worker, messages) = spawn_crash_worker(&root, "idb_crash_after_file_sync");
+        assert_eq!(wait_for_message(&messages).await, "idb-file-synced");
+        worker.terminate();
 
-    let reopened = IdbVfs::with_root(&root).await.unwrap();
-    let baseline = reopened.open("baseline", OpenMode::Read).await.unwrap();
-    let mut bytes = [0; 7];
-    assert_eq!(baseline.read_at(0, &mut bytes).await.unwrap(), 7);
-    assert_eq!(&bytes, b"durable");
-    assert!(reopened.open("doomed", OpenMode::Read).await.is_err());
-    reopened.sync_dir("/").await.unwrap();
+        let reopened = IdbVfs::with_root(&root).await.unwrap();
+        let baseline = reopened.open("baseline", OpenMode::Read).await.unwrap();
+        let mut bytes = [0; 7];
+        assert_eq!(baseline.read_at(0, &mut bytes).await.unwrap(), 7);
+        assert_eq!(&bytes, b"durable");
+        assert!(reopened.open("doomed", OpenMode::Read).await.is_err());
+        reopened.sync_dir("/").await.unwrap();
 
-    let store = IdbStore::open(&database).await.unwrap();
-    assert_eq!(store.load_file(0).await.unwrap(), Some(b"durable".to_vec()));
-    assert_eq!(store.load_file(1).await.unwrap(), None);
-    store.close();
-    drop(baseline);
-    drop(reopened);
-    IdbStore::delete(&database).await.unwrap();
+        let store = IdbStore::open(&database).await.unwrap();
+        assert_eq!(store.load_file(0).await.unwrap(), Some(b"durable".to_vec()));
+        assert_eq!(store.load_file(1).await.unwrap(), None);
+        store.close();
+        drop(baseline);
+        drop(reopened);
+        IdbStore::delete(&database).await.unwrap();
+    }
 }
 
-#[wasm_bindgen_test]
+#[cfg_attr(not(feature = "idb-crash-browser-parent"), wasm_bindgen_test)]
+// browser-proof-scenario
 async fn idb_vfs_worker_termination_after_namespace_sync_keeps_metadata_published() {
     let root = format!("crash-namespace-sync-{}", js_sys::Date::now());
-    let database = format!("pagedb-idb-vfs:{root}");
-    seed_baseline(&root).await;
+    #[cfg(feature = "idb-crash-browser-parent")]
+    {
+        run_driver_to_completion(&root, "idb_seed_baseline").await;
+        let (worker, messages) = spawn_crash_worker(&root, "idb_crash_after_namespace_sync");
+        assert_eq!(wait_for_message(&messages).await, "idb-namespace-synced");
+        worker.terminate();
+        run_driver_to_completion(&root, "idb_verify_namespace_sync").await;
+    }
+    #[cfg(not(feature = "idb-crash-browser-parent"))]
+    {
+        let database = format!("pagedb-idb-vfs:{root}");
+        seed_baseline(&root).await;
 
-    let (worker, messages) = spawn_crash_worker(&root, "idb_crash_after_namespace_sync");
-    assert_eq!(wait_for_message(&messages).await, "idb-namespace-synced");
-    worker.terminate();
+        let (worker, messages) = spawn_crash_worker(&root, "idb_crash_after_namespace_sync");
+        assert_eq!(wait_for_message(&messages).await, "idb-namespace-synced");
+        worker.terminate();
 
-    let reopened = IdbVfs::with_root(&root).await.unwrap();
-    let baseline = reopened.open("baseline", OpenMode::Read).await.unwrap();
-    let doomed = reopened.open("doomed", OpenMode::Read).await.unwrap();
-    let mut baseline_bytes = [0; 7];
-    let mut doomed_bytes = [0; 11];
-    assert_eq!(baseline.read_at(0, &mut baseline_bytes).await.unwrap(), 7);
-    assert_eq!(doomed.read_at(0, &mut doomed_bytes).await.unwrap(), 11);
-    assert_eq!(&baseline_bytes, b"durable");
-    assert_eq!(&doomed_bytes, b"unpublished");
+        let reopened = IdbVfs::with_root(&root).await.unwrap();
+        let baseline = reopened.open("baseline", OpenMode::Read).await.unwrap();
+        let doomed = reopened.open("doomed", OpenMode::Read).await.unwrap();
+        let mut baseline_bytes = [0; 7];
+        let mut doomed_bytes = [0; 11];
+        assert_eq!(baseline.read_at(0, &mut baseline_bytes).await.unwrap(), 7);
+        assert_eq!(doomed.read_at(0, &mut doomed_bytes).await.unwrap(), 11);
+        assert_eq!(&baseline_bytes, b"durable");
+        assert_eq!(&doomed_bytes, b"unpublished");
 
-    drop(doomed);
-    drop(baseline);
-    drop(reopened);
-    IdbStore::delete(&database).await.unwrap();
+        drop(doomed);
+        drop(baseline);
+        drop(reopened);
+        IdbStore::delete(&database).await.unwrap();
+    }
 }
 
-#[wasm_bindgen_test]
+#[cfg_attr(not(feature = "idb-crash-browser-parent"), wasm_bindgen_test)]
+// browser-proof-scenario
 async fn idb_vfs_worker_termination_after_header_write_recovers_the_prior_commit() {
     let root = format!("crash-header-sync-{}", js_sys::Date::now());
-    let database = format!("pagedb-idb-vfs:{root}");
-    seed_database(&root).await;
+    #[cfg(feature = "idb-crash-browser-parent")]
+    {
+        run_driver_to_completion(&root, "idb_seed_database").await;
+        let (worker, messages) = spawn_crash_worker(&root, "idb_crash_after_header_write");
+        let beacon = wait_for_message(&messages).await;
+        assert!(
+            beacon.starts_with("phase-reached:Sync#2"),
+            "unexpected crash beacon: {beacon}"
+        );
+        worker.terminate();
+        run_driver_to_completion(&root, "idb_verify_header_write").await;
+    }
+    #[cfg(not(feature = "idb-crash-browser-parent"))]
+    {
+        let database = format!("pagedb-idb-vfs:{root}");
+        seed_database(&root).await;
 
-    let (worker, messages) = spawn_crash_worker(&root, "idb_crash_after_header_write");
-    let beacon = wait_for_message(&messages).await;
-    assert!(
-        beacon.starts_with("phase-reached:Sync#2"),
-        "unexpected crash beacon: {beacon}"
-    );
-    worker.terminate();
+        let (worker, messages) = spawn_crash_worker(&root, "idb_crash_after_header_write");
+        let beacon = wait_for_message(&messages).await;
+        assert!(
+            beacon.starts_with("phase-reached:Sync#2"),
+            "unexpected crash beacon: {beacon}"
+        );
+        worker.terminate();
 
-    let vfs = IdbVfs::with_root(&root).await.unwrap();
-    let db = Db::open_existing(vfs.clone(), KEK, PAGE, REALM)
-        .await
-        .unwrap();
-    let read = db.begin_read().await.unwrap();
-    assert_eq!(
-        read.get(b"baseline").await.unwrap().as_deref(),
-        Some(b"committed-gen-1".as_ref())
-    );
-    assert_eq!(read.get(b"victim").await.unwrap(), None);
-    drop(read);
-    drop(db);
-    drop(vfs);
-    IdbStore::delete(&database).await.unwrap();
+        let vfs = IdbVfs::with_root(&root).await.unwrap();
+        let db = Db::open_existing(vfs.clone(), KEK, PAGE, REALM)
+            .await
+            .unwrap();
+        let read = db.begin_read().await.unwrap();
+        assert_eq!(
+            read.get(b"baseline").await.unwrap().as_deref(),
+            Some(b"committed-gen-1".as_ref())
+        );
+        assert_eq!(read.get(b"victim").await.unwrap(), None);
+        drop(read);
+        drop(db);
+        drop(vfs);
+        IdbStore::delete(&database).await.unwrap();
+    }
 }
 
-#[wasm_bindgen_test]
+#[cfg_attr(not(feature = "idb-crash-browser-parent"), wasm_bindgen_test)]
+// browser-proof-scenario
 async fn idb_vfs_worker_termination_inside_namespace_transaction_keeps_path_unpublished() {
     let root = format!("crash-namespace-put-{}", js_sys::Date::now());
-    let database = format!("pagedb-idb-vfs:{root}");
-    seed_baseline(&root).await;
+    #[cfg(feature = "idb-crash-browser-parent")]
+    {
+        run_driver_to_completion(&root, "idb_seed_baseline").await;
+        let (worker, messages) = spawn_crash_worker(&root, "idb_crash_during_namespace_put");
+        assert_eq!(
+            wait_for_message(&messages).await,
+            "idb-namespace-transaction-active"
+        );
+        worker.terminate();
+        run_driver_to_completion(&root, "idb_verify_namespace_put").await;
+    }
+    #[cfg(not(feature = "idb-crash-browser-parent"))]
+    {
+        let database = format!("pagedb-idb-vfs:{root}");
+        seed_baseline(&root).await;
 
-    let (worker, messages) = spawn_crash_worker(&root, "idb_crash_during_namespace_put");
-    assert_eq!(
-        wait_for_message(&messages).await,
-        "idb-namespace-transaction-active"
-    );
-    worker.terminate();
+        let (worker, messages) = spawn_crash_worker(&root, "idb_crash_during_namespace_put");
+        assert_eq!(
+            wait_for_message(&messages).await,
+            "idb-namespace-transaction-active"
+        );
+        worker.terminate();
 
-    let reopened = IdbVfs::with_root(&root).await.unwrap();
-    let baseline = reopened.open("baseline", OpenMode::Read).await.unwrap();
-    let mut bytes = [0; 7];
-    assert_eq!(baseline.read_at(0, &mut bytes).await.unwrap(), 7);
-    assert_eq!(&bytes, b"durable");
-    assert!(reopened.open("doomed", OpenMode::Read).await.is_err());
-    reopened.sync_dir("/").await.unwrap();
+        let reopened = IdbVfs::with_root(&root).await.unwrap();
+        let baseline = reopened.open("baseline", OpenMode::Read).await.unwrap();
+        let mut bytes = [0; 7];
+        assert_eq!(baseline.read_at(0, &mut bytes).await.unwrap(), 7);
+        assert_eq!(&bytes, b"durable");
+        assert!(reopened.open("doomed", OpenMode::Read).await.is_err());
+        reopened.sync_dir("/").await.unwrap();
 
-    let store = IdbStore::open(&database).await.unwrap();
-    assert_eq!(store.load_file(1).await.unwrap(), None);
-    store.close();
-    drop(baseline);
-    drop(reopened);
-    IdbStore::delete(&database).await.unwrap();
+        let store = IdbStore::open(&database).await.unwrap();
+        assert_eq!(store.load_file(1).await.unwrap(), None);
+        store.close();
+        drop(baseline);
+        drop(reopened);
+        IdbStore::delete(&database).await.unwrap();
+    }
+}
+
+#[cfg(feature = "idb-crash-browser-parent")]
+#[wasm_bindgen_test]
+async fn idb_vfs_worker_termination_supported_cases_run_serially() {
+    idb_vfs_worker_termination_after_file_sync_keeps_metadata_unpublished().await;
+    idb_vfs_worker_termination_after_namespace_sync_keeps_metadata_published().await;
+    idb_vfs_worker_termination_after_header_write_recovers_the_prior_commit().await;
+    idb_vfs_worker_termination_inside_namespace_transaction_keeps_path_unpublished().await;
 }
