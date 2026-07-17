@@ -210,6 +210,14 @@ Host operating-system coverage and blockers are tracked independently in the
 compile-only; Windows, Manjaro, and Raspberry Pi browser execution are not
 currently green.
 
+- [x] QEMU exposes the `raspi4b` machine and boots a checksum-pinned official
+  Raspberry Pi kernel to the required Linux and Pi 4 model markers through
+  `just test-raspi4b-model`.
+- [x] Raspberry Pi simulation artifacts and QEMU logs stay outside the checkout
+  under `~/.volumes` by default.
+- [ ] The QEMU board-model smoke is intentionally not promoted to Raspberry Pi
+  OS, browser, OPFS, network, or physical-hardware evidence.
+
 ## Containerized Desktop Lane
 
 - [x] The local Docker image was built and run for this revision.

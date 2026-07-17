@@ -146,6 +146,11 @@ crate and PageDB durability claims, their qualifying commands, and their
 current evidence status.
 See [`docs/host-platform-matrix.md`](docs/host-platform-matrix.md) for the
 separate macOS, Windows, Debian, Ubuntu, Manjaro, and Raspberry Pi host lanes.
+The bounded, containerized `just test-raspi4b-model` lane separately proves that
+a pinned Raspberry Pi kernel boots under QEMU's Raspberry Pi 4 board model
+without requiring host QEMU installation; see
+[`docs/raspi4b-model.md`](docs/raspi4b-model.md) for its deliberately narrower
+proof boundary and external-volume storage controls.
 
 ## Containerized Desktop Proofs
 
@@ -163,8 +168,9 @@ commands for hosts that do not have `just` installed.
 
 `just verify` runs native formatting, lint, tests, the Wasm compile check, the
 regular-command runner, and source/config/secret scanning. `just container-verify`
-runs the container workspace check and scans the locally built image. `just
-security` runs both scanners directly.
+runs the container workspace check and scans both locally built runtime images.
+`just security` runs the source gate and both image gates directly;
+`just security-raspi4b-image` targets only the board-model image.
 
 After `mise trust .mise.toml`, the same commands are available through `mise
 run verify`, `mise run container-verify`, `mise run security`, `mise run

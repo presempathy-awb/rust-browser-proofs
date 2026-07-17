@@ -29,6 +29,7 @@ just container-test-consumer-desktop
 just container-report
 just security-source
 just security-image
+just security-raspi4b-image
 just security
 ```
 
@@ -48,12 +49,13 @@ dependencies, Docker configuration, and secrets. The checkout is mounted
 read-only, the scanner has no Docker socket, and its only writable state is the
 named `rust-browser-proofs-trivy-cache` advisory cache.
 
-`just security-image` builds the local image, writes it to a temporary Docker
-archive, then scans that archive without mounting the Docker socket. Both gates
-fail on high or critical findings. The image gate deliberately ignores unfixed
-advisories so it remains an actionable release gate; it does not claim that an
-upstream base-image advisory is remediated. The source gate does not ignore
-unfixed findings.
+`just security-image` builds the desktop-browser image, writes it to a temporary
+Docker archive, then scans that archive without mounting the Docker socket.
+`just security-raspi4b-image` applies the same archive gate to the isolated QEMU
+board-model image. All gates fail on high or critical findings. The image gates
+deliberately ignore unfixed advisories so they remain actionable release gates;
+they do not claim that an upstream base-image advisory is remediated. The source
+gate does not ignore unfixed findings.
 
 `just security` runs both gates. `just verify` adds the source gate to native
 format, lint, test, Wasm, and command-runner checks; `just container-verify`

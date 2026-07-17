@@ -17,6 +17,45 @@ default:
 install-wasm32-unknown-unknown:
     rustup target add wasm32-unknown-unknown
 
+# Build the isolated QEMU board-model image. Host QEMU is not required.
+raspi4b-model-container-build:
+    docker build --tag "${RUST_BROWSER_PROOFS_RASPI4_IMAGE:-rust-browser-proofs-raspi4b:local}" --file Dockerfile.raspi4b .
+
+# Download and verify the pinned Raspberry Pi kernel and Pi 4 device tree in
+# the isolated container. Artifacts stay under ~/.volumes by default.
+prepare-raspi4b-model: raspi4b-model-container-build
+    bash scripts/run-raspi4b-container.sh prepare
+
+# Show containerized QEMU and pinned firmware readiness without starting a VM.
+raspi4b-model-status: raspi4b-model-container-build
+    bash scripts/run-raspi4b-container.sh status
+
+# Boot a pinned Raspberry Pi kernel under containerized QEMU's raspi4b board
+# model, write a Markdown report, and mirror it into the existing SQLite cache.
+test-raspi4b-model report_path="": raspi4b-model-container-build
+    #!/usr/bin/env bash
+    set -euo pipefail
+    report_path="{{ report_path }}"
+    if [[ -z "$report_path" ]]; then
+        report_dir="${RUST_BROWSER_PROOFS_REPORT_DIR:-${XDG_CACHE_HOME:-$HOME/cache}/rust-browser-proofs/browser-tests}"
+        report_path="$report_dir/$(( $(date -u +%s) * 1000 ))-raspi4b-model-status.md"
+    fi
+    bash scripts/run-raspi4b-container.sh test "$report_path"
+    cargo run -p rust-browser-proofs --features runner -- --mirror-report "$report_path"
+
+# Explicit host fast path for machines that already provide QEMU's raspi4b
+# model. This recipe never installs QEMU or writes artifacts into the checkout.
+test-raspi4b-model-host report_path="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    report_path="{{ report_path }}"
+    if [[ -z "$report_path" ]]; then
+        report_dir="${RUST_BROWSER_PROOFS_REPORT_DIR:-${XDG_CACHE_HOME:-$HOME/cache}/rust-browser-proofs/browser-tests}"
+        report_path="$report_dir/$(( $(date -u +%s) * 1000 ))-raspi4b-model-host-status.md"
+    fi
+    bash scripts/run-raspi4b-model-smoke.sh test --report "$report_path"
+    cargo run -p rust-browser-proofs --features runner -- --mirror-report "$report_path"
+
 # One-time setup: tools, wasm target, git hooks
 setup:
     mise install
@@ -1177,6 +1216,18 @@ check-matrix-recipe-contract:
 check-host-platform-contract:
     bash scripts/check-host-platform-contract.sh
 
+# Compile the Windows-only native lock proof without claiming that it ran.
+# This host-side preflight uses the installed x86_64 GNU target; it does not
+# substitute for the local Windows 11 ARM64 guest's native execution. On a
+# real Windows host, use the direct cargo command documented in the host
+# platform matrix so the test exercises LockFileEx across two processes.
+check-windows-lock:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    stable_rustc="$(rustup which --toolchain stable rustc)"
+    stable_cargo="$(rustup which --toolchain stable cargo)"
+    env -u RUSTUP_TOOLCHAIN RUSTC="$stable_rustc" CARGO="$stable_cargo" "$stable_cargo" check -p pagedb-opfs-harness --target x86_64-pc-windows-gnu --test windows_cross_process_lock
+
 report-environment report_path="":
     #!/usr/bin/env bash
     set -euo pipefail
@@ -1200,10 +1251,10 @@ container-test-consumer-firefox: container-build
     bash scripts/run-browser-container.sh "{{ container_image }}" --shm-size=1g -- bash -c 'cd "$RUST_BROWSER_PROOFS_WORKSPACE/fixtures/consumer-battery" && rust-browser-proofs -- wasm-pack test --headless --firefox --test opfs_battery'
 
 container-test-consumer-playwright: container-build
-    docker run --rm --shm-size=1g "{{ container_image }}" bash /opt/rust-browser-proofs/playwright/run-opfs-battery.sh
+    bash scripts/run-browser-container.sh "{{ container_image }}" --shm-size=1g -- bash /opt/rust-browser-proofs/playwright/run-opfs-battery.sh
 
 container-test-consumer-puppeteer: container-build
-    docker run --rm --init --cap-add=SYS_ADMIN --shm-size=1g "{{ container_image }}" bash /opt/rust-browser-proofs/puppeteer/run-opfs-battery.sh
+    bash scripts/run-browser-container.sh "{{ container_image }}" --init --cap-add=SYS_ADMIN --shm-size=1g -- bash /opt/rust-browser-proofs/puppeteer/run-opfs-battery.sh
 
 container-test-consumer-desktop: container-test-consumer-chrome container-test-consumer-firefox container-test-consumer-playwright container-test-consumer-puppeteer
 
@@ -1240,15 +1291,26 @@ security-image: container-build
     docker save --output "$scan_dir/image.tar" "{{ container_image }}"
     docker run --rm --read-only --cap-drop ALL --security-opt no-new-privileges:true --tmpfs /tmp:rw,noexec,nosuid,size=512m --mount type=volume,source="{{ trivy_cache_volume }}",target=/root/.cache --mount type=bind,source="$scan_dir",target=/scan,readonly "{{ trivy_image }}" image --input /scan/image.tar --scanners vuln,secret --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --skip-version-check
 
-# Complete supply-chain gate: source/config/secrets plus the built runtime image.
-security: security-source security-image
+# Apply the same archive-based vulnerability and secret gate to the isolated
+# Raspberry Pi board-model runtime without exposing the Docker socket.
+security-raspi4b-image: raspi4b-model-container-build
+    #!/usr/bin/env bash
+    set -euo pipefail
+    scan_dir="$(mktemp -d "${TMPDIR:-/tmp}/rust-browser-proofs-raspi4b-scan.XXXXXX")"
+    trap 'rm -rf "$scan_dir"' EXIT
+    image="${RUST_BROWSER_PROOFS_RASPI4_IMAGE:-rust-browser-proofs-raspi4b:local}"
+    docker save --output "$scan_dir/image.tar" "$image"
+    docker run --rm --read-only --cap-drop ALL --security-opt no-new-privileges:true --tmpfs /tmp:rw,noexec,nosuid,size=512m --mount type=volume,source="{{ trivy_cache_volume }}",target=/root/.cache --mount type=bind,source="$scan_dir",target=/scan,readonly "{{ trivy_image }}" image --input /scan/image.tar --scanners vuln,secret --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --skip-version-check
+
+# Complete supply-chain gate: source/config/secrets plus both runtime images.
+security: security-source security-image security-raspi4b-image
 
 # Native integrity gate used by Mise and the pre-push hook. Browser execution is
 # intentionally a separate, explicit proof because it needs real browser drivers.
 verify: fmt-check lint test-native wasm-check check-command-runner check-android-recipe-contract check-iphone-chrome-recipe-contract check-matrix-recipe-contract check-host-platform-contract security-source
 
 # Container integrity gate used by Mise and the pre-push hook.
-container-verify: container-check security-image
+container-verify: container-check security-image security-raspi4b-image
 
 # Native-side tests (manifest codec, receipt reference, etc.)
 test-native:

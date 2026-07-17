@@ -1,0 +1,20 @@
+FROM debian:trixie-slim@sha256:020c0d20b9880058cbe785a9db107156c3c75c2ac944a6aa7ab59f2add76a7bd
+
+ARG DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update \
+    && apt-get upgrade --yes \
+    && apt-get install --yes --no-install-recommends \
+        ca-certificates \
+        coreutils \
+        curl \
+        qemu-system-arm \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY scripts/run-raspi4b-model-smoke.sh /usr/local/bin/run-raspi4b-model-smoke
+
+RUN adduser --disabled-password --gecos '' --uid 10001 qemu
+
+USER 10001:10001
+
+ENTRYPOINT ["/usr/local/bin/run-raspi4b-model-smoke"]
