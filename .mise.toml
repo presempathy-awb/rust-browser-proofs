@@ -5,36 +5,56 @@
 _.path = "./bin"
 
 [tools]
-rust = "1.95"
+rust = "1.95.0"
 java = "21.0.2"
-jj = "0.41"
+jj = "0.43.0"
 just = "1.52.0"
-"aqua:rustwasm/wasm-pack" = "latest"
+"aqua:rustwasm/wasm-pack" = "0.15.0"
 lefthook = "2.1.9"
+
+[tasks.setup-status]
+description = "Verify the pinned local toolchain, Docker engine, and setup contracts"
+run = "mise exec -- just setup-status"
 
 [tasks.verify]
 description = "Run native formatting, lint, test, wasm, runner, and source-security checks"
-run = "just verify"
+run = "mise exec -- just verify"
 
 [tasks.install-wasm32-unknown-unknown]
 description = "Install Rustup's wasm32-unknown-unknown target"
-run = "just install-wasm32-unknown-unknown"
+run = "mise exec -- just install-wasm32-unknown-unknown"
 
 [tasks.container-verify]
 description = "Build and validate the self-contained desktop-browser image"
-run = "just container-verify"
+run = "mise exec -- just container-verify"
 
 [tasks.security]
 description = "Scan the source tree and locally built container image"
-run = "just security"
+run = "mise exec -- just security"
 
 [tasks.security-source]
 description = "Scan source, configuration, and secrets through the pinned Trivy image"
-run = "just security-source"
+run = "mise exec -- just security-source"
 
 [tasks.security-image]
 description = "Scan the locally built container image through a Docker archive"
-run = "just security-image"
+run = "mise exec -- just security-image"
+
+[tasks.prepare-raspi4b-model]
+description = "Download and verify pinned Raspberry Pi 4 model artifacts in the container lane"
+run = "mise exec -- just prepare-raspi4b-model"
+
+[tasks.raspi4b-model-status]
+description = "Show containerized Raspberry Pi 4 model readiness"
+run = "mise exec -- just raspi4b-model-status"
+
+[tasks.test-raspi4b-model]
+description = "Boot the pinned Raspberry Pi 4 model and record its report"
+run = "mise exec -- just test-raspi4b-model"
+
+[tasks.security-raspi4b-image]
+description = "Scan the locally built Raspberry Pi 4 model image"
+run = "mise exec -- just security-raspi4b-image"
 
 [settings]
 experimental = false

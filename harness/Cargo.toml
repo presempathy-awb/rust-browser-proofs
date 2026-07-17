@@ -25,7 +25,7 @@ idb-crash-driver = ["pagedb/idb-crash-driver"]
 idb-crash-browser-parent = []
 
 [dependencies]
-pagedb = { git = "ssh://git@git.telpher.stream:2222/awb/pagedb.git", branch = "main", features = ["opfs"] }
+pagedb = { git = "ssh://git@git.telpher.stream:2222/awb/pagedb.git", rev = "214113a7f489d9eb96a45b9eaa4a501ea95f18f5", features = ["opfs"] }
 blake3 = "1"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]

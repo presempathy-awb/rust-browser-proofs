@@ -151,6 +151,8 @@ a pinned Raspberry Pi kernel boots under QEMU's Raspberry Pi 4 board model
 without requiring host QEMU installation; see
 [`docs/raspi4b-model.md`](docs/raspi4b-model.md) for its deliberately narrower
 proof boundary and external-volume storage controls.
+For pinned clean-machine bootstrap, read-only setup diagnosis, cache ownership,
+and recovery procedures, see [`docs/setup-recovery.md`](docs/setup-recovery.md).
 
 ## Containerized Desktop Proofs
 
@@ -174,7 +176,10 @@ runs the container workspace check and scans both locally built runtime images.
 
 After `mise trust .mise.toml`, the same commands are available through `mise
 run verify`, `mise run container-verify`, `mise run security`, `mise run
-security-source`, and `mise run security-image`. `just setup` installs the
+security-source`, `mise run security-image`, `mise run test-raspi4b-model`, and
+`mise run security-raspi4b-image`. `just setup-status` performs a read-only
+audit of the required local tools, Docker daemon, Wasm target, immutable source
+pins, and setup documentation. `just setup` installs the
 Lefthook gates: source security before commit, then native and container
 verification before push. The scanner is a digest-pinned Docker image and does
 not add a Rust or JavaScript dependency to this workspace. The hooks are

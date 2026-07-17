@@ -18,7 +18,8 @@ jobs:
       CARGO_NET_GIT_FETCH_WITH_CLI: "true"
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        # actions/checkout v4.3.1
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
       - name: Validate PageDB dependency credential
         env:
           PAGEDB_DEPLOY_KEY: ${{ secrets.PAGEDB_DEPLOY_KEY }}
@@ -36,29 +37,38 @@ jobs:
           mkdir -p ~/.ssh
           printf '%s\n' "$PAGEDB_DEPLOY_KEY" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
-          if ! ssh-keyscan -p 22 gitea >> ~/.ssh/known_hosts 2>/dev/null; then
+          if ! ssh-keyscan -p 2222 gitea >> ~/.ssh/known_hosts 2>/dev/null; then
             echo "::error::Unable to reach the internal Gitea SSH service from this Actions runner."
             exit 1
           fi
           cat >> ~/.ssh/config <<'EOF'
           Host gitea
             User git
+            Port 2222
             IdentityFile ~/.ssh/id_ed25519
             IdentitiesOnly yes
             StrictHostKeyChecking yes
           EOF
           chmod 600 ~/.ssh/config
-          git config --global url."ssh://git@gitea:22/".insteadOf \
+          git config --global url."ssh://git@gitea:2222/".insteadOf \
             "ssh://git@git.telpher.stream:2222/"
-      - name: Install Rust 1.95 + wasm target
+      - name: Install Rust 1.95.0 + wasm target
         run: |
           set -eu
           command -v rustup >/dev/null 2>&1 || {
-            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+            rustup_init=/tmp/rustup-init
+            curl --fail --location --silent --show-error \
+              https://static.rust-lang.org/rustup/archive/1.29.0/x86_64-unknown-linux-gnu/rustup-init \
+              --output "$rustup_init"
+            printf '%s  %s\n' \
+              4acc9acc76d5079515b46346a485974457b5a79893cfb01112423c89aeb5aa10 \
+              "$rustup_init" | sha256sum --check
+            chmod 700 "$rustup_init"
+            "$rustup_init" -y --profile minimal --default-toolchain none --no-modify-path
           }
           . "$HOME/.cargo/env" 2>/dev/null || true
-          rustup toolchain install 1.95 --profile minimal
-          rustup default 1.95
+          rustup toolchain install 1.95.0 --profile minimal
+          rustup default 1.95.0
           rustup component add rustfmt clippy
           rustup target add wasm32-unknown-unknown
       - name: fmt + clippy + native tests + wasm checks
@@ -70,3 +80,8 @@ jobs:
           cargo test --workspace
           cargo run -p rust-browser-proofs --features runner -- -- cargo check -p rust-browser-proofs-consumer-fixture --target wasm32-unknown-unknown --tests
           cargo check -p pagedb-opfs-harness --target wasm32-unknown-unknown
+          bash scripts/check-android-recipe-contract.sh
+          bash scripts/check-iphone-chrome-recipe-contract.sh
+          bash scripts/check-matrix-recipe-contract.sh
+          bash scripts/check-host-platform-contract.sh
+          bash scripts/check-setup-durability-contract.sh

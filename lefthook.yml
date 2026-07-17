@@ -4,13 +4,13 @@ rc: .lefthookrc
 pre-commit:
   commands:
     fmt-check:
-      run: just fmt-check
+      run: mise exec -- just fmt-check
     security-source:
-      run: just security-source
+      run: mise exec -- just security-source
 
 pre-push:
   commands:
     verify:
-      run: just verify
+      run: mise exec -- just verify
     container-verify:
-      run: just container-verify
+      run: mise exec -- just container-verify

@@ -53,13 +53,16 @@ browser test must isolate its OPFS namespace (unique subdirectory) and clean up
 - origin state persists across tests in one browser session. Current proof
 evidence lives in docs/browser-environment-checklist.md. `just verify` is the
 native integrity gate and includes the source/config/secret scan; `just
-container-verify` checks and scans the locally built desktop-browser image;
-`just security` runs both scan gates. Trivy runs from a pinned container image,
+container-verify` checks the desktop-browser image and scans both locally built
+runtime images; `just security` runs the source, desktop-image, and Raspberry Pi
+image gates. The Raspberry Pi model artifacts live outside the checkout under
+`RUST_BROWSER_PROOFS_RASPI4_VOLUME_DIR`. Trivy runs from a pinned container image,
 gets a read-only source tree or image archive, and never receives the Docker
 socket. `just setup` installs source scanning before commit and native plus
 container verification before push. Use `mise run verify`, `mise run
-container-verify`, or `mise run security` for the same gates after trusting the
-Mise config. The image gate blocks fixable high/critical findings and explicitly
+container-verify`, `mise run security`, or the dedicated `mise run
+test-raspi4b-model` and `mise run security-raspi4b-image` tasks for the same
+gates after trusting the Mise config. The image gate blocks fixable high/critical findings and explicitly
 does not treat ignored unfixed base-image advisories as remediated. These hooks
 are verification-only: `.lefthookrc` invokes Lefthook with `--no-stage-fixed`
 so its partial-staging safeguard never resets a dirty nested checkout.

@@ -4,6 +4,10 @@
 set dotenv-load
 set shell := ["bash", "-uc"]
 
+rustup_bin := env_var_or_default("CARGO_HOME", env_var("HOME") + "/.cargo") + "/bin"
+export PATH := rustup_bin + ":" + env_var("PATH")
+export RUSTUP_TOOLCHAIN := "1.95.0"
+
 container_image := "rust-browser-proofs:local"
 # Trivy v0.70.0 multi-architecture manifest list. The digest prevents mutable
 # tag drift while preserving native scanner images on supported CI architectures.
@@ -38,7 +42,7 @@ test-raspi4b-model report_path="": raspi4b-model-container-build
     report_path="{{ report_path }}"
     if [[ -z "$report_path" ]]; then
         report_dir="${RUST_BROWSER_PROOFS_REPORT_DIR:-${XDG_CACHE_HOME:-$HOME/cache}/rust-browser-proofs/browser-tests}"
-        report_path="$report_dir/$(( $(date -u +%s) * 1000 ))-raspi4b-model-status.md"
+        report_path="$report_dir/$(( $(date -u +%s) * 1000 ))-$$-raspi4b-model-status.md"
     fi
     bash scripts/run-raspi4b-container.sh test "$report_path"
     cargo run -p rust-browser-proofs --features runner -- --mirror-report "$report_path"
@@ -51,7 +55,7 @@ test-raspi4b-model-host report_path="":
     report_path="{{ report_path }}"
     if [[ -z "$report_path" ]]; then
         report_dir="${RUST_BROWSER_PROOFS_REPORT_DIR:-${XDG_CACHE_HOME:-$HOME/cache}/rust-browser-proofs/browser-tests}"
-        report_path="$report_dir/$(( $(date -u +%s) * 1000 ))-raspi4b-model-host-status.md"
+        report_path="$report_dir/$(( $(date -u +%s) * 1000 ))-$$-raspi4b-model-host-status.md"
     fi
     bash scripts/run-raspi4b-model-smoke.sh test --report "$report_path"
     cargo run -p rust-browser-proofs --features runner -- --mirror-report "$report_path"
@@ -60,7 +64,35 @@ test-raspi4b-model-host report_path="":
 setup:
     mise install
     just install-wasm32-unknown-unknown
-    lefthook install
+    mise exec -- lefthook install
+
+# Read-only clean-machine setup audit. It installs or changes nothing.
+setup-status:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    for command in mise rustup just docker; do
+        command -v "$command" >/dev/null 2>&1 || {
+            printf 'missing_required_command=%s\n' "$command" >&2
+            exit 1
+        }
+    done
+    mise --version
+    rustup --version
+    rustc --version | grep -E '^rustc 1\.95\.'
+    mise exec -- wasm-pack --version | grep -Fx 'wasm-pack 0.15.0'
+    mise exec -- just --version | grep -Fx 'just 1.52.0'
+    mise exec -- jj --version | grep -F 'jj 0.43.0'
+    mise exec -- lefthook version | grep -F '2.1.9'
+    docker version >/dev/null
+    echo 'docker_engine=available'
+    rustup target list --installed | grep -Fx 'wasm32-unknown-unknown' >/dev/null || {
+        echo 'missing_rust_target=wasm32-unknown-unknown' >&2
+        exit 1
+    }
+    bash scripts/check-setup-durability-contract.sh
+    printf 'raspi4_volume=%s\n' "${RUST_BROWSER_PROOFS_RASPI4_VOLUME_DIR:-$HOME/.volumes/rust-browser-proofs/raspi4b-model}"
+    printf 'report_dir=%s\n' "${RUST_BROWSER_PROOFS_REPORT_DIR:-${XDG_CACHE_HOME:-$HOME/cache}/rust-browser-proofs/browser-tests}"
+    echo 'setup_status=ok'
 
 install-adb:
     #!/usr/bin/env bash
@@ -1216,6 +1248,9 @@ check-matrix-recipe-contract:
 check-host-platform-contract:
     bash scripts/check-host-platform-contract.sh
 
+check-setup-durability-contract:
+    bash scripts/check-setup-durability-contract.sh
+
 # Compile the Windows-only native lock proof without claiming that it ran.
 # This host-side preflight uses the installed x86_64 GNU target; it does not
 # substitute for the local Windows 11 ARM64 guest's native execution. On a
@@ -1307,7 +1342,7 @@ security: security-source security-image security-raspi4b-image
 
 # Native integrity gate used by Mise and the pre-push hook. Browser execution is
 # intentionally a separate, explicit proof because it needs real browser drivers.
-verify: fmt-check lint test-native wasm-check check-command-runner check-android-recipe-contract check-iphone-chrome-recipe-contract check-matrix-recipe-contract check-host-platform-contract security-source
+verify: fmt-check lint test-native wasm-check check-command-runner check-android-recipe-contract check-iphone-chrome-recipe-contract check-matrix-recipe-contract check-host-platform-contract check-setup-durability-contract security-source
 
 # Container integrity gate used by Mise and the pre-push hook.
 container-verify: container-check security-image security-raspi4b-image
